@@ -55,9 +55,25 @@ docker run -d --name hanwha-monitor --restart unless-stopped \
 
 With the Compose Manager plugin you can instead use `server/docker-compose.yml`. Change `build: .` to `build: /mnt/user/appdata/hanwha-monitor/src`.
 
-**Option B: use the GitHub-built image**
+**Option B: use the GitHub-built image (stays private)**
 
-In GitHub, go to your profile → Packages → `hanwha-monitor-server` → Package settings. Either make it public, or log Unraid in to ghcr.io. Then in Unraid go to **Docker → Add Container** and fill it in from `server/unraid-template.xml`. Set the repository to `ghcr.io/<your-username>/hanwha-monitor-server:latest`.
+The image at `ghcr.io/draconad/hanwha-monitor-server` is private, like the repo. Give Unraid a read-only key to pull it:
+
+1. On GitHub, go to **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)**. Tick only **`read:packages`**, choose an expiry, and copy the token. It has to be a *classic* token, because GitHub's container registry doesn't accept fine-grained ones.
+2. In the Unraid terminal:
+   ```bash
+   mkdir -p /boot/config/ghcr
+   echo "PASTE_TOKEN_HERE" > /boot/config/ghcr/token
+   cat /boot/config/ghcr/token | docker login ghcr.io -u Draconad --password-stdin
+   ```
+3. Unraid's `/root` is wiped at every reboot, and that's where the login is kept. So re-login on boot by adding this line to the end of `/boot/config/go`:
+   ```bash
+   cat /boot/config/ghcr/token | docker login ghcr.io -u Draconad --password-stdin
+   ```
+   (Or use the User Scripts plugin with "At Startup of Array".)
+4. **Docker → Add Container**: set the Repository to `ghcr.io/draconad/hanwha-monitor-server:latest` and fill in the rest from `server/unraid-template.xml`.
+
+To update after a new build, use **Force update** on the container. Unraid's "update available" check often can't see private images, but the pull itself works.
 
 **Check it:** open `http://<unraid-ip>:8420/`. You should see the dashboard showing "Waiting for the monitor PC".
 
