@@ -86,7 +86,7 @@ final class LiveActivityManager: ObservableObject {
     func start(with status: MachineStatus?, machineName: String) {
         guard AppSettings.liveActivity else { return }
         guard systemEnabled else {
-            lastError = "Live Activities are turned off for this app in iOS Settings."
+            lastError = "iOS isn't allowing Live Activities for this app. Check Settings › XE35 Monitor › Live Activities (and Settings › Face ID & Passcode › Live Activities on the Lock Screen)."
             return
         }
         guard activity == nil else { return }

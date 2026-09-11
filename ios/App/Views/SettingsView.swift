@@ -67,6 +67,12 @@ struct SettingsView: View {
                         Spacer()
                         Text(live.isActive ? "Showing" : "Not showing").foregroundStyle(.secondary)
                     }
+                    HStack {
+                        Text("Allowed by iOS")
+                        Spacer()
+                        Text(live.systemEnabled ? "Yes" : "No")
+                            .foregroundStyle(live.systemEnabled ? Color.secondary : Color.orange)
+                    }
                     if liveActivity && !live.isActive {
                         Button("Start Live Activity now") {
                             live.start(with: store.status, machineName: store.machineName)
