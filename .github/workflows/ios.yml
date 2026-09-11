@@ -1,4 +1,13 @@
-name: iOS app (unsigned IPA for Sideloadly)
+name: iOS app (TestFlight, or unsigned IPA)
+
+# With the App Store Connect secrets set (paid developer account - see README), every build is signed
+# and uploaded to TestFlight. Without them it falls back to an unsigned .ipa for iLoader.
+#
+# Secrets (repo → Settings → Secrets and variables → Actions):
+#   ASC_KEY_ID       App Store Connect API key ID          (Users and Access → Integrations → Team keys, role Admin)
+#   ASC_ISSUER_ID    issuer ID shown on that page
+#   ASC_KEY_P8       full contents of the AuthKey_XXXX.p8 you downloaded
+#   APPLE_TEAM_ID    your 10-character Team ID (Membership details)
 
 on:
   workflow_dispatch:
@@ -8,10 +17,11 @@ on:
 
 jobs:
   build:
-    # macos-26 = Xcode 26 / iOS 26 SDK (same runner the RED-TOK app builds on).
-    # SWIFT_VERSION stays 5.0 in project.yml so Xcode 26 doesn't switch to Swift 6 strict concurrency.
+    # macos-26 = Xcode 26. SWIFT_VERSION stays 5.0 in project.yml so Xcode 26 doesn't switch to Swift 6.
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 45
+    env:
+      HAS_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,56 +37,74 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Build (no code signing - Sideloadly signs it)
+      # ------------------------------------------------------------------ TestFlight
+      - name: Archive, sign and upload to TestFlight
+        if: env.HAS_ASC == 'true'
+        working-directory: ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          # TestFlight needs every upload's build number to be higher than the last: "<project build>.<run>"
+          BASE=$(grep -m1 'CURRENT_PROJECT_VERSION' project.yml | grep -oE '[0-9]+')
+          BUILD="$BASE.${{ github.run_number }}"
+          echo "Build number $BUILD"
+
+          xcodebuild archive \
+            -project HanwhaMonitor.xcodeproj -scheme HanwhaMonitor -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/HanwhaMonitor.xcarchive \
+            "${AUTH[@]}" DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$BUILD" \
+            2>&1 | tee build.log | grep -E "error:|warning: .*[Ss]ign|ARCHIVE (SUCCEEDED|FAILED)" || true
+          test -d build/HanwhaMonitor.xcarchive/Products/Applications/HanwhaMonitor.app
+
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+
+          xcodebuild -exportArchive -archivePath build/HanwhaMonitor.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/export "${AUTH[@]}" \
+            2>&1 | tee -a build.log | grep -E "error:|Upload|EXPORT (SUCCEEDED|FAILED)" || true
+          grep -q "EXPORT SUCCEEDED" build.log
+
+          mkdir -p testflight
+          echo "Build $BUILD uploaded to TestFlight at $(date -u). Apple takes ~5-15 minutes to process it; then update from the TestFlight app." > testflight/README.txt
+
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_ASC == 'true'
+        with:
+          name: HanwhaMonitor-testflight
+          path: ios/testflight/README.txt
+
+      # ------------------------------------------------------------------ unsigned fallback (iLoader)
+      - name: Build unsigned (iLoader signs it)
+        if: env.HAS_ASC != 'true'
         working-directory: ios
         run: |
           set -o pipefail
           xcodebuild \
-            -project HanwhaMonitor.xcodeproj \
-            -scheme HanwhaMonitor \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            -project HanwhaMonitor.xcodeproj -scheme HanwhaMonitor -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
-            build 2>&1 | tee build.log
+            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/HanwhaMonitor.app
 
-      # Full log as a downloadable file, pass or fail.
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-build-log
-          path: ios/build.log
-          retention-days: 30
-
-      # An extension with no CFBundleVersion builds fine and is then refused by the phone at install.
-      - name: Check every bundle declares a version
-        working-directory: ios
-        run: |
-          app="build/Build/Products/Release-iphoneos/HanwhaMonitor.app"
-          status=0
-          for bundle in "$app" "$app"/PlugIns/*.appex; do
-            plist="$bundle/Info.plist"
-            [ -f "$plist" ] || { echo "::error::missing $plist"; status=1; continue; }
-            for key in CFBundleVersion CFBundleShortVersionString CFBundleIdentifier; do
-              value="$(plutil -extract "$key" raw -o - "$plist" 2>/dev/null || true)"
-              if [ -z "$value" ]; then echo "::error::$(basename "$bundle") has no $key"; status=1
-              else echo "$(basename "$bundle") $key = $value"; fi
-            done
-          done
-          ls "$app/PlugIns" || { echo "::error::Live Activity extension missing"; status=1; }
-          exit $status
-
-      # Ad-hoc sign the extension and the app before handing them to Sideloadly.
-      #
-      # The unsigned build had no _CodeSignature in the .appex, and after Sideloadly signed it
-      # the iPad refused to launch the Live Activity extension:
-      #   AMFI: constraint violation .../MachineWidget.appex/MachineWidget has entitlements but is not a main binary
-      #   chronod: Launched process exited during launch.
-      # Apple's codesign marks each bundle's executable as a main binary and seals its Info.plist,
-      # so Sideloadly starts from a properly structured, already-signed bundle.
-      - name: Ad-hoc sign bundles (inside out)
+      - name: Ad-hoc sign bundles and package IPA
+        if: env.HAS_ASC != 'true'
         working-directory: ios
         run: |
           app="build/Build/Products/Release-iphoneos/HanwhaMonitor.app"
@@ -84,20 +112,26 @@ jobs:
             codesign --force --sign - --timestamp=none --generate-entitlement-der "$appex"
           done
           codesign --force --sign - --timestamp=none --generate-entitlement-der "$app"
-          for b in "$app"/PlugIns/*.appex "$app"; do
-            echo "== $b"; codesign -dvvv "$b" 2>&1 | grep -E "Identifier|Format|CodeDirectory|Runtime|flags" || true
-            ls "$b/_CodeSignature"
+          for bundle in "$app" "$app"/PlugIns/*.appex; do
+            for key in CFBundleVersion CFBundleShortVersionString CFBundleIdentifier; do
+              echo "$(basename "$bundle") $key = $(plutil -extract "$key" raw -o - "$bundle/Info.plist")"
+            done
           done
-
-      - name: Package IPA
-        working-directory: ios
-        run: |
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/HanwhaMonitor.app Payload/
+          cp -R "$app" Payload/
           zip -qry HanwhaMonitor.ipa Payload
 
       - uses: actions/upload-artifact@v4
+        if: env.HAS_ASC != 'true'
         with:
           name: HanwhaMonitor-ipa
           path: ios/HanwhaMonitor.ipa
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build.log
           retention-days: 30

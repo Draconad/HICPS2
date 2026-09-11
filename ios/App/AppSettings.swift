@@ -22,7 +22,7 @@ enum AppSettings {
             SettingsKey.apiKey: "",
             SettingsKey.pollInterval: 3.0,
             SettingsKey.backgroundInterval: 10.0,
-            SettingsKey.keepAlive: true,
+            SettingsKey.keepAlive: false,   // only needed without Apple push (free Apple ID)
             SettingsKey.liveActivity: true,
             SettingsKey.notifyAlarms: true,
             SettingsKey.notifyStopped: false,

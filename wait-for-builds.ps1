@@ -165,6 +165,17 @@ foreach ($t in $targets) {
   }
   $tmp = Join-Path $outDir ("_dl_" + $t.Artifact)
   if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+  if ($t.Workflow -eq "ios.yml") {
+    # Paid-account builds go straight to TestFlight instead of producing an .ipa
+    $tf = Join-Path $outDir "_dl_testflight"
+    if (Test-Path $tf) { Remove-Item -Recurse -Force $tf }
+    & gh run download $runId --repo $Repo --name "HanwhaMonitor-testflight" --dir $tf 2>$null
+    if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $tf "README.txt"))) {
+      Write-Host ("{0}: {1}" -f $t.Name, (Get-Content (Join-Path $tf "README.txt") -Raw).Trim()) -ForegroundColor Green
+      Remove-Item -Recurse -Force $tf
+      continue
+    }
+  }
   & gh run download $runId --repo $Repo --name $t.Artifact --dir $tmp
   $src = Join-Path $tmp $t.File
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src)) {
@@ -185,6 +196,6 @@ if ($saved.Count -gt 0) {
 if ($anyFailed) {
   Pause-Exit 1
 }
-Write-Host "Done. Sideload the .ipa with Sideloadly; copy the .exe to the machine PC" -ForegroundColor Green
+Write-Host "Done. iPhone: update from TestFlight (or install the .ipa with iLoader); copy the .exe to the machine PC" -ForegroundColor Green
 Write-Host "(next to Fwlib32.dll and fwlibe1.dll)."
 Pause-Exit 0

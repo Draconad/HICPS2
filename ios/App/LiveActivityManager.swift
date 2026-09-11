@@ -17,6 +17,8 @@ final class LiveActivityManager: ObservableObject {
     private var lastPushed: Attrs.ContentState?
     private var lastPushTime = Date.distantPast
     private var stateTask: Task<Void, Never>?
+    private var tokenTask: Task<Void, Never>?
+    private var watchers: [Task<Void, Never>] = []
     private var warnedRestart = false
 
     /// iOS ends a Live Activity after 8 hours; restart a little before that.
@@ -24,7 +26,29 @@ final class LiveActivityManager: ObservableObject {
 
     var systemEnabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
+    static func isRunning(id: String) -> Bool {
+        Activity<Attrs>.activities.contains { $0.id == id && ($0.activityState == .active || $0.activityState == .stale) }
+    }
+
     private init() {
+        // Activities the SERVER starts (push-to-start) appear here - the app is woken in the background
+        // so it can pick them up and send their update token back to the server.
+        watchers.append(Task { [weak self] in
+            for await a in Activity<Attrs>.activityUpdates {
+                guard let self else { return }
+                if self.activity?.id != a.id {
+                    EventLog.shared.add("LA appeared (started by push?) \(a.id.prefix(8))")
+                    self.adopt(a, startedAt: Date())
+                }
+            }
+        })
+        if #available(iOS 17.2, *) {
+            watchers.append(Task {
+                for await data in Activity<Attrs>.pushToStartTokenUpdates {
+                    PushManager.shared.register(kind: "la_start", token: data.hexString, activityID: nil)
+                }
+            })
+        }
         // Re-attach to an activity that survived an app relaunch; end any duplicates.
         let existing = Activity<Attrs>.activities
         if let first = existing.first {
@@ -46,11 +70,18 @@ final class LiveActivityManager: ObservableObject {
             self.startedAt = saved > 0 ? Date(timeIntervalSince1970: saved) : Date()
         }
         isActive = true
+        tokenTask?.cancel()
+        tokenTask = Task {
+            for await data in a.pushTokenUpdates {
+                PushManager.shared.register(kind: "la", token: data.hexString, activityID: a.id)
+            }
+        }
         stateTask?.cancel()
         stateTask = Task { [weak self] in
             for await st in a.activityStateUpdates {
                 EventLog.shared.add("LA state -> \(st)")
                 if st == .ended || st == .dismissed {
+                    PushManager.shared.unregister(activityID: a.id)
                     // This Task inherits @MainActor from adopt(), so no MainActor.run hop is needed
                     // (and referencing the weak `self` capture from a nested @Sendable closure is an error).
                     if let self, self.activity?.id == a.id {
@@ -67,7 +98,8 @@ final class LiveActivityManager: ObservableObject {
         guard let s else {
             return previous.map { p in var c = p; c.reachable = false; return c } ??
                 Attrs.ContentState(state: .off, detail: "Waiting for server", parts: nil, required: nil, lastCycle: nil,
-                                   cycleStart: nil, program: "", alarms: [], reachable: false, updated: Date())
+                                   cycleStartEpoch: nil, program: "", alarms: [], reachable: false,
+                                   updatedEpoch: Date().timeIntervalSince1970)
         }
         var program = s.program?.title ?? ""
         if program == "—" { program = "" }
@@ -77,11 +109,11 @@ final class LiveActivityManager: ObservableObject {
             parts: s.parts,
             required: s.partsRequired,
             lastCycle: s.lastCycleS,
-            cycleStart: s.cycleStart,
+            cycleStartEpoch: s.cycleStart?.timeIntervalSince1970,
             program: program,
             alarms: s.activeAlarms.prefix(3).map(\.summary),
             reachable: reachable,
-            updated: Date())
+            updatedEpoch: Date().timeIntervalSince1970)
     }
 
     /// One-line summary shown in Settings to help work out why nothing appears.
@@ -112,9 +144,15 @@ final class LiveActivityManager: ObservableObject {
         guard activity == nil else { lastAttempt = "already running"; return }
         let state = Self.content(from: status, reachable: status != nil, previous: nil)
         do {
-            let a = try Activity.request(attributes: Attrs(machineName: machineName),
-                                         content: ActivityContent(state: state, staleDate: staleDate()),
-                                         pushType: nil)
+            let content = ActivityContent(state: state, staleDate: staleDate())
+            let a: Activity<Attrs>
+            do {
+                // .token lets the server update it through Apple push (paid developer account builds)
+                a = try Activity.request(attributes: Attrs(machineName: machineName), content: content, pushType: .token)
+            } catch {
+                EventLog.shared.add("LA push-token request refused (\(error)) - starting without push")
+                a = try Activity.request(attributes: Attrs(machineName: machineName), content: content, pushType: nil)
+            }
             adopt(a, startedAt: Date())
             EventLog.shared.add("LA started")
             lastPushed = state
@@ -159,7 +197,7 @@ final class LiveActivityManager: ObservableObject {
                 isActive = false
                 start(with: status, machineName: machineName)
                 return
-            } else if !warnedRestart {
+            } else if !warnedRestart && !PushManager.shared.serverHandlesPush {
                 warnedRestart = true
                 NotificationManager.shared.post(id: "la-restart", title: "Live Activity ending soon",
                                                 body: "Open the monitor app to keep the lock screen status going.")
@@ -174,11 +212,11 @@ final class LiveActivityManager: ObservableObject {
 
         let new = Self.content(from: status, reachable: reachable, previous: lastPushed)
         var cmpNew = new, cmpOld = lastPushed
-        cmpNew.updated = .distantPast
-        cmpOld?.updated = .distantPast
+        cmpNew.updatedEpoch = 0
+        cmpOld?.updatedEpoch = 0
         // cycleStart jitters by a few hundred ms between polls; ignore small drift
-        if let n = cmpNew.cycleStart, let o = cmpOld?.cycleStart, abs(n.timeIntervalSince(o)) < 3 {
-            cmpNew.cycleStart = o
+        if let n = cmpNew.cycleStartEpoch, let o = cmpOld?.cycleStartEpoch, abs(n - o) < 3 {
+            cmpNew.cycleStartEpoch = o
         }
         let changed = cmpNew != cmpOld
         let heartbeatDue = Date().timeIntervalSince(lastPushTime) > 30
@@ -196,4 +234,9 @@ final class LiveActivityManager: ObservableObject {
         lastPushed = new
         lastPushTime = Date()
     }
+}
+
+
+extension Data {
+    var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }

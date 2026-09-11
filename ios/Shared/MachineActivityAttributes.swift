@@ -46,12 +46,17 @@ struct MachineActivityAttributes: ActivityAttributes {
         var parts: Int?
         var required: Int?
         var lastCycle: Double?
-        /// Set while running so the lock screen can count the current cycle up on its own.
-        var cycleStart: Date?
+        /// Unix time the current cycle started (while running), so the lock screen can count it up on its own.
+        /// Plain numbers rather than Date: the server builds this same JSON for push updates, and Date's
+        /// default Codable format (seconds since 2001) is easy to get wrong from outside Swift.
+        var cycleStartEpoch: Double?
         var program: String
         var alarms: [String]
         var reachable: Bool
-        var updated: Date
+        var updatedEpoch: Double
+
+        var cycleStart: Date? { cycleStartEpoch.map { Date(timeIntervalSince1970: $0) } }
+        var updated: Date { Date(timeIntervalSince1970: updatedEpoch) }
 
         var progress: Double {
             guard let p = parts, let r = required, r > 0 else { return 0 }

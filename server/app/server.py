@@ -1,4 +1,4 @@
-"""Hanwha Monitor server (Python standard library only - no pip packages needed).
+"""Hanwha Monitor server (standard library; httpx[http2] + cryptography only for Apple push).
 
 Receives snapshots from the Windows agent, keeps the alarm history in SQLite, and serves
 status to the iPhone app plus a small web dashboard.
@@ -8,6 +8,9 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/alarms     alarm history  (?limit=100&before=<epoch>&active=1)
   GET  /api/states     state change log (?hours=24)
   GET  /api/health
+  POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
+  POST /api/push/unregister {token? , activity_id?}
+  GET  /api/push/status     POST /api/push/test
   GET  /               web dashboard
 """
 from __future__ import annotations
@@ -24,7 +27,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.0.0"
+try:  # works both as "python app/server.py" and as a package import
+    from apns import APNs
+    from push import PushService
+except ImportError:  # pragma: no cover
+    from .apns import APNs
+    from .push import PushService
+
+VERSION = "1.1.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -201,6 +211,7 @@ def ingest(snap: dict) -> dict:
         track_state(now)
         kv_set("latest", latest)
         kv_set("meta", meta)
+    push.poke()
     return {"ok": True, "ack": ack}
 
 
@@ -261,6 +272,19 @@ def state_history(hours: float) -> dict:
         rows = db.execute("SELECT ts,state,detail FROM state_log WHERE ts>=? ORDER BY ts",
                           (time.time() - hours * 3600,)).fetchall()
     return {"states": [dict(r) for r in rows]}
+
+
+def _kv_get_locked(k, default=None):
+    with _lock:
+        return kv_get(k, default)
+
+
+def _kv_set_locked(k, v):
+    with _lock:
+        kv_set(k, v)
+
+
+push = PushService(db, _lock, APNs(), lambda: status(), _kv_get_locked, _kv_set_locked)
 
 
 def clear_history() -> dict:
@@ -329,6 +353,21 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(snap, dict):
                     return self._json({"detail": "expected object"}, 400)
                 return self._json(ingest(snap))
+            if path.startswith("/api/push/"):
+                body = {}
+                if method == "POST":
+                    length = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(length)) if 0 < length < 100_000 else {}
+                if method == "GET" and path == "/api/push/status":
+                    return self._json(push.info())
+                if method == "POST" and path == "/api/push/register":
+                    return self._json(push.register(body.get("kind", ""), body.get("token", ""), body.get("activity_id"),
+                                                    body.get("env"), body.get("prefs")))
+                if method == "POST" and path == "/api/push/unregister":
+                    push.unregister(body.get("token", ""), body.get("activity_id", ""))
+                    return self._json({"ok": True})
+                if method == "POST" and path == "/api/push/test":
+                    return self._json(push.test_alert())
             if method == "DELETE" and path == "/api/alarms":
                 return self._json(clear_history())
             return self._json({"detail": "not found"}, 404)
@@ -362,8 +401,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     httpd.daemon_threads = True
-    log.info("Hanwha Monitor server %s listening on :%d (db %s, api key %s)", VERSION, PORT, DB_PATH,
-             "ON" if API_KEY else "off")
+    log.info("Hanwha Monitor server %s listening on :%d (db %s, api key %s, push %s)", VERSION, PORT, DB_PATH,
+             "ON" if API_KEY else "off", "ON" if push.apns.enabled else push.apns.error)
     httpd.serve_forever()
 
 

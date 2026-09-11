@@ -10,8 +10,8 @@ Remote status and alarm monitoring for the Hanwha XE35 (FANUC 0i-F), as a replac
 | Folder | What it is |
 |---|---|
 | `agent/`  | Windows desktop app. Has a status window, settings, a log and a tray icon, and starts with Windows. |
-| `server/` | Docker container for Unraid. Pure Python, no dependencies, with SQLite alarm history and a web dashboard on `:8420`. |
-| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built in the cloud and sideloaded with iLoader. |
+| `server/` | Docker container for Unraid. Python, with SQLite alarm history, a web dashboard on `:8420`, and Apple push for the iPhone. |
+| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built in the cloud and installed through TestFlight (or iLoader without a paid account). |
 | `.github/workflows/` | Free cloud builds for the `.ipa` (on a Mac), the `.exe` (on Windows) and the Docker image. |
 
 ---
@@ -82,6 +82,7 @@ Environment options:
 | `API_KEY` | *(blank)* | Optional shared key. If set, enter the same key in the PC app and the iPhone app. |
 | `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
 | `TZ` | | Your timezone, used for the "alarms today" count. |
+| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(blank)* | Apple push. See section 4. Put the `AuthKey_….p8` in the data folder. |
 
 ---
 
@@ -120,16 +121,62 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 
 ---
 
-## 4. iPhone app (iLoader, free Apple ID)
+## 4. iPhone app
+
+### With the paid developer account: TestFlight + Apple push (recommended)
+
+Every push to GitHub builds, signs and uploads the app to **TestFlight**. Your iPhone and iPad install it and update it from the TestFlight app. That means no sideloading, no 3-app limit and no 7-day expiry (TestFlight builds last 90 days). The server uses **Apple push** to keep the Live Activity, the Dynamic Island and alarm alerts up to date while the app is closed.
+
+You only do this setup once.
+
+**A. Apple Developer website** (developer.apple.com → Account)
+1. **Identifiers → +**, App IDs → App. Register:
+   - Description `HiCPS-2`, Bundle ID (explicit) **`com.jtquayle.hicps2`**. Tick **Push Notifications** and **Time Sensitive Notifications**.
+   - A second App ID: `HiCPS-2 Widget`, **`com.jtquayle.hicps2.widget`**, with no capabilities.
+   - To use different IDs, change them in `ios/project.yml`, then set `APNS_TOPIC` on the server to match.
+2. **Keys → +**: name it `HiCPS push` and tick **Apple Push Notifications service (APNs)**. Download the **`AuthKey_XXXXXXXXXX.p8`** (you can only download it once) and note its **Key ID**.
+3. Note your **Team ID**. It's under Membership details.
+
+**B. App Store Connect** (appstoreconnect.apple.com)
+1. **Apps → + → New App**: iOS, name `HiCPS-2` (add something to the name if it's taken), bundle ID `com.jtquayle.hicps2`, and any SKU. It stays private; never submit it for review, since the icon and name are Hanwha's.
+2. **Users and Access → Integrations → App Store Connect API → Team Keys → +**: name it `GitHub`, access **Admin** (needed so the build can create its own signing certificate). Download the `.p8`, then note its **Key ID** and the **Issuer ID** shown above the list.
+3. **TestFlight → Internal Testing → +**: create a group, add yourself, and turn on automatic distribution.
+
+**C. GitHub**: in the HICPS2 repo, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Secret | Value |
+|---|---|
+| `ASC_KEY_ID` | App Store Connect API Key ID (B2) |
+| `ASC_ISSUER_ID` | Issuer ID (B2) |
+| `ASC_KEY_P8` | open the B2 `.p8` in Notepad and paste **all** of it, including the BEGIN/END lines |
+| `APPLE_TEAM_ID` | Team ID (A3) |
+
+**D. Unraid server** (for push)
+1. Copy the APNs key from A2 (`AuthKey_XXXXXXXXXX.p8`) into `/mnt/user/appdata/hanwha-monitor/data/`.
+2. Edit the container and add these variables: `APNS_KEY_ID` = the A2 Key ID, `APNS_TEAM_ID` = your Team ID, `APNS_TOPIC` = `com.jtquayle.hicps2`.
+3. Rebuild or update the container (this version installs two small Python packages for push). The log should say `push ON`.
+
+**E. Build and install**
+1. Run `push-to-github.bat`. When the iPhone build finishes it says *"uploaded to TestFlight"*.
+2. After Apple finishes processing it (about 5–15 minutes), install **TestFlight** from the App Store on your iPhone/iPad and install HiCPS-2 from there.
+3. Open HiCPS-2 → Settings: enter the server URL and allow notifications. **Push (Apple)** should say **Working**. Tap **Send test notification** to check.
+4. Delete the old sideloaded copy. The new one has a different bundle ID, so the two install side by side.
+
+What push changes:
+- **The Live Activity stays current while the app is closed.** The server sends an update whenever the status, parts, cycle or alarms change, and a refresh every 10 minutes.
+- **Alarm notifications arrive even when the app is closed.** They're *Time Sensitive*, so they get through Focus modes. The stopped and off notifications follow your Settings toggles.
+- **The 8-hour limit is handled on iPhone and iPad (iOS/iPadOS 17.2 or later).** Just before iOS ends a Live Activity, the server ends it and starts a fresh one by push. It also starts one on its own when the machine changes state and none is showing.
+- **The silent-audio trick is no longer needed.** It's off by default now.
+
+### Without push: iLoader (free Apple ID)
+
+If the GitHub secrets aren't set, the build makes an unsigned `HanwhaMonitor-bN.ipa` instead:
 
 1. On the iPhone, turn on **Settings → Privacy & Security → Developer Mode**. The phone restarts.
-2. Install `HanwhaMonitor-bN.ipa` with **iLoader** and your Apple ID.
-   > **Don't use Sideloadly for this app.** Sideloadly signs the Live Activity extension in a way iOS rejects (`AMFI: … has entitlements but is not a main binary`). The app still runs, but the Live Activity, the Dynamic Island and widgets never appear. iLoader signs it correctly. RED-TOK's Dynamic Island has the same problem and the same fix.
-3. On the phone, go to **Settings → General → VPN & Device Management** → trust your Apple ID.
-4. Open **HiCPS-2** → **Settings**:
-   - Enter the server URL `http://<unraid-ip>:8420` → **Test connection**. Allow local network access when asked.
-   - Allow notifications.
-5. The Live Activity starts on its own. Lock the phone to see it, or swipe home to see the Dynamic Island.
+2. Install the `.ipa` with **iLoader** and your Apple ID.
+   > **Don't use Sideloadly for this app.** Sideloadly signs the Live Activity extension in a way iOS rejects (`AMFI: … has entitlements but is not a main binary`). The app still runs, but the Live Activity and the Dynamic Island never appear. iLoader signs it correctly. RED-TOK has the same problem and the same fix.
+3. Go to **Settings → General → VPN & Device Management** and trust your Apple ID.
+4. Open **HiCPS-2** → Settings: set the server URL, and turn on **Silent-audio keep-alive**. Without push, that's the only way to keep the Live Activity updating.
 
 **What you get**
 
@@ -146,14 +193,12 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
   - Long-press: status, parts, cycle times, program and the current alarm.
 - **Lock screen:** status colour bar, parts/required with progress, cycle time with a live current-cycle timer, and up to two active alarms. It greys out with "No update since…" if the phone loses contact.
 
-### Limits of a free Apple ID (and how the app works around them)
+### Limits without push (free Apple ID)
 
-- **No Apple push notifications.** The server can't wake the phone, so the app keeps itself running in the background by playing *silent audio*. This mixes with music, so it doesn't interrupt anything. That's what keeps the Live Activity and alarm notifications live. You can turn it off in Settings to save battery. If iOS ever kills the app, the Live Activity greys out, and a background refresh roughly every 15 minutes is the fallback.
-- **8-hour Live Activity limit.** iOS ends every Live Activity after 8 hours. The app replaces it whenever you open the app. If it's been running all day, you'll get a reminder notification to open the app.
-- **7-day signing.** Free-signed apps stop launching after 7 days. Re-install with iLoader (it can refresh apps for you) at least weekly.
-- **Network.** The phone needs to reach Unraid: either be on the home Wi-Fi, or run Tailscale on the phone (section 2b) so it works from anywhere.
-
-A paid Apple Developer account ($99/yr) would remove the first three limits. The server would then push updates through Apple instead, and the app would need a small extension to support that.
+- The app has to keep itself awake with silent audio, and iOS still suspends it sometimes, e.g. when a video app takes over the audio. The Live Activity then falls behind until you open the app.
+- iOS ends a Live Activity after 8 hours. Opening the app starts a new one.
+- Free-signed apps stop launching after 7 days unless iLoader refreshes them.
+- The phone needs to reach Unraid: either be on the home Wi-Fi, or run Tailscale (section 2b).
 
 ---
 

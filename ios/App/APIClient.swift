@@ -84,6 +84,44 @@ struct APIClient {
         try await send(try request("/api/health"), as: HealthResponse.self)
     }
 
+    struct PushStatus: Decodable {
+        var enabled: Bool
+        var error: String?
+        var tokens: [String: Int]?
+        var sent: Int?
+    }
+
+    private func post<T: Decodable>(_ path: String, _ body: [String: Any], as type: T.Type) async throws -> T {
+        var req = try request(path, method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await send(req, as: T.self)
+    }
+
+    /// Returns whether the server has Apple push configured.
+    func pushRegister(kind: String, token: String, activityID: String?, env: String, prefs: [String: Bool]?) async throws -> Bool {
+        struct R: Decodable { var ok: Bool; var pushEnabled: Bool? }
+        var body: [String: Any] = ["kind": kind, "token": token, "env": env]
+        if let activityID { body["activity_id"] = activityID }
+        if let prefs { body["prefs"] = prefs }
+        return try await post("/api/push/register", body, as: R.self).pushEnabled ?? false
+    }
+
+    func pushUnregister(activityID: String) async throws {
+        struct R: Decodable { var ok: Bool }
+        _ = try await post("/api/push/unregister", ["activity_id": activityID], as: R.self)
+    }
+
+    func pushStatus() async throws -> PushStatus {
+        try await send(try request("/api/push/status"), as: PushStatus.self)
+    }
+
+    func pushTest() async throws -> String {
+        struct R: Decodable { var ok: Bool; var sent: Int?; var devices: Int?; var error: String? }
+        let r = try await post("/api/push/test", [:], as: R.self)
+        return r.ok ? "Test sent to \(r.sent ?? 0) device(s)" : "Not sent: \(r.error?.isEmpty == false ? r.error! : "no devices registered")"
+    }
+
     func clearHistory() async throws {
         struct OK: Decodable { var ok: Bool }
         _ = try await send(try request("/api/alarms", method: "DELETE"), as: OK.self)

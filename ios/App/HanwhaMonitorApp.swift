@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct HanwhaMonitorApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = MachineStore()
     @StateObject private var live = LiveActivityManager.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -16,8 +17,10 @@ struct HanwhaMonitorApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(live)
+                .environmentObject(PushManager.shared)
                 .task {
                     _ = await NotificationManager.shared.requestPermission()
+                    PushManager.shared.registerAll()
                     store.startPolling()
                 }
         }

@@ -11,5 +11,8 @@
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/hanwha-monitor/data" Mode="rw" Type="Path" Display="always" Required="true">/mnt/user/appdata/hanwha-monitor/data</Config>
   <Config Name="Timezone" Target="TZ" Default="Europe/London" Type="Variable" Display="always" Required="false">Europe/London</Config>
   <Config Name="API key (optional)" Target="API_KEY" Default="" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="APNs Key ID" Target="APNS_KEY_ID" Default="" Type="Variable" Display="always" Required="false"></Config>
+  <Config Name="Apple Team ID" Target="APNS_TEAM_ID" Default="" Type="Variable" Display="always" Required="false"></Config>
+  <Config Name="App bundle ID (APNs topic)" Target="APNS_TOPIC" Default="com.jtquayle.hicps2" Type="Variable" Display="always" Required="false">com.jtquayle.hicps2</Config>
   <Config Name="Agent timeout (s)" Target="AGENT_TIMEOUT" Default="30" Type="Variable" Display="advanced" Required="false">30</Config>
 </Container>

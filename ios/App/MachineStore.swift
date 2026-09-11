@@ -83,6 +83,8 @@ final class MachineStore: ObservableObject {
 
     private func handleNotifications(new s: MachineStatus) {
         defer { previousState = s.state }
+        // With Apple push set up, the server sends these (even when the app is closed) - don't double up.
+        if PushManager.shared.serverHandlesPush { return }
         if AppSettings.notifyAlarms {
             for a in s.activeAlarms where NotificationManager.shared.markAlarmNotified(a.id) {
                 // Don't spam about alarms that were already active long before we looked

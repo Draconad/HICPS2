@@ -5,12 +5,14 @@ import UserNotifications
 struct SettingsView: View {
     @EnvironmentObject var store: MachineStore
     @EnvironmentObject var live: LiveActivityManager
+    @EnvironmentObject var push: PushManager
+    @State private var pushInfo: String?
 
     @AppStorage(SettingsKey.serverURL) private var serverURL = "http://tower.local:8420"
     @AppStorage(SettingsKey.apiKey) private var apiKey = ""
     @AppStorage(SettingsKey.pollInterval) private var pollInterval = 3.0
     @AppStorage(SettingsKey.backgroundInterval) private var backgroundInterval = 10.0
-    @AppStorage(SettingsKey.keepAlive) private var keepAlive = true
+    @AppStorage(SettingsKey.keepAlive) private var keepAlive = false
     @AppStorage(SettingsKey.liveActivity) private var liveActivity = true
     @AppStorage(SettingsKey.notifyAlarms) private var notifyAlarms = true
     @AppStorage(SettingsKey.notifyStopped) private var notifyStopped = false
@@ -96,7 +98,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Keep updating in background", isOn: $keepAlive)
+                    Toggle("Silent-audio keep-alive (no push)", isOn: $keepAlive)
                         .onChange(of: keepAlive) { on in
                             if on { BackgroundKeeper.shared.start() } else { BackgroundKeeper.shared.stop() }
                         }
@@ -112,7 +114,34 @@ struct SettingsView: View {
                 } header: {
                     Text("Updates")
                 } footer: {
-                    Text("Without paid Apple push notifications, the app keeps itself awake in the background by playing silent audio (it won't interrupt music). This is what keeps the Live Activity and alarm alerts live. Turn it off to save battery — the Live Activity will then only update when you open the app.")
+                    Text("With Apple push working (see Push below) the server keeps the Live Activity and alerts up to date on its own, so leave this OFF. It's only a fallback for builds without push: it keeps the app awake by playing silent audio.")
+                }
+
+                Section {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(push.serverHandlesPush ? "Working" : (push.deviceToken == nil ? "Not registered" : "Server not set up"))
+                            .foregroundStyle(push.serverHandlesPush ? Color.green : Color.orange)
+                    }
+                    if let err = push.lastError {
+                        Text(err).font(.footnote).foregroundStyle(.orange)
+                    }
+                    if let info = pushInfo {
+                        Text(info).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Button("Send test notification") {
+                        Task {
+                            pushInfo = "Sending…"
+                            do { pushInfo = try await APIClient.current.pushTest() }
+                            catch { pushInfo = error.localizedDescription }
+                        }
+                    }
+                    Button("Re-register with server") { push.registerAll() }
+                } header: {
+                    Text("Push (Apple)")
+                } footer: {
+                    Text("The server sends alarm alerts and keeps the Live Activity current through Apple push, even when the app is closed. Needs the APNs key set up on the server (see README).")
                 }
 
                 Section {
@@ -156,7 +185,7 @@ struct SettingsView: View {
                         LabeledContent("Machine", value: s.machineName)
                         LabeledContent("Monitor PC", value: s.agentOnline ? "Online" : "Offline")
                     }
-                    Text("Sideloaded with a free Apple ID? The app stops opening after 7 days until it is re-signed. Refresh it with iLoader at least weekly.")
+                    Text("Installed from TestFlight? Builds expire after 90 days - each new push to GitHub makes a fresh one.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -164,6 +193,9 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .task { notifStatus = await NotificationManager.shared.authorizationStatus() }
             .onChange(of: serverURL) { _ in testResult = nil }
+            .onChange(of: notifyAlarms) { _ in push.registerAll() }
+            .onChange(of: notifyStopped) { _ in push.registerAll() }
+            .onChange(of: notifyOff) { _ in push.registerAll() }
             .onDisappear { store.restartPolling() }
             .confirmationDialog("Clear alarm history?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Clear history", role: .destructive) {
@@ -192,6 +224,7 @@ struct SettingsView: View {
             let h = try await APIClient.current.health()
             testResult = (true, "Connected to server v\(h.version ?? "?")")
             store.restartPolling()
+            push.registerAll()
         } catch {
             testResult = (false, error.localizedDescription)
         }
