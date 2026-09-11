@@ -27,9 +27,10 @@ struct StatusView: View {
                     if let s = store.status {
                         StateHeader(s: s)
                             .background(GeometryReader { g in
-                                Color.clear.preference(key: HeaderBottomKey.self,
-                                                       value: g.frame(in: .named("statusScroll")).maxY)
+                                Color.clear.preference(key: HeaderTopKey.self,
+                                                       value: g.frame(in: .named("statusScroll")).minY)
                             })
+                            .opacity(pinned ? 0 : 1)     // the pinned bar has taken over
                         if let msgs = s.messages, !msgs.isEmpty {
                             MessagesCard(messages: msgs, offset: s.clockOffset)
                         }
@@ -66,9 +67,11 @@ struct StatusView: View {
                 .padding(16)
             }
             .coordinateSpace(name: "statusScroll")
-            .onPreferenceChange(HeaderBottomKey.self) { bottom in
-                let hide = bottom < 12
-                if hide != pinned { withAnimation(.easeOut(duration: 0.18)) { pinned = hide } }
+            // switch to the slim bar the moment the status box reaches the status bar / Dynamic Island,
+            // so it's never left half-hidden (and unreadable) under it
+            .onPreferenceChange(HeaderTopKey.self) { top in
+                let hide = top < 1
+                if hide != pinned { withAnimation(.easeOut(duration: 0.12)) { pinned = hide } }
             }
             .onPreferenceChange(PartsBottomKey.self) { bottom in
                 let gone = bottom < 64          // under the pinned bar
@@ -77,7 +80,12 @@ struct StatusView: View {
             .overlay(alignment: .top) {
                 if pinned, let s = store.status {
                     PinnedStatusBar(s: s, showParts: partsHidden)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .transition(.opacity)
+                } else {
+                    // solid strip behind the clock / Dynamic Island, so cards don't show through it as they scroll
+                    Color(.systemGroupedBackground)
+                        .frame(height: 0)
+                        .background(Color(.systemGroupedBackground).ignoresSafeArea(edges: .top))
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -102,7 +110,7 @@ struct StatusView: View {
 
 /// Operator messages from the CNC (e.g. "work count end in 1 hour") - shown as information, not alarms.
 /// "CAMERA ⌄" - tap to fold the video (and its controls) away; remembered.
-private struct HeaderBottomKey: PreferenceKey {
+private struct HeaderTopKey: PreferenceKey {
     static let defaultValue: CGFloat = .infinity
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = min(value, nextValue()) }
 }
