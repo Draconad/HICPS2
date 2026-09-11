@@ -49,6 +49,7 @@ struct APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = method
         if !apiKey.isEmpty { req.setValue(apiKey, forHTTPHeaderField: "X-API-Key") }
+        req.setValue("ios-app", forHTTPHeaderField: "X-Client")   // lets the server know the app is open
         return req
     }
 

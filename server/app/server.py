@@ -330,6 +330,9 @@ def program_label(key: str | None) -> str | None:
     return f"{key} - {name}" if key and name else key
 
 
+app_seen = [0.0]      # when the iPhone app last polled (see LA_IDLE_END in push.py)
+
+
 def program_info() -> dict:
     """The running program plus its key, your name for it, the combined label and its average cycle time."""
     prog = dict(latest.get("program") or {})
@@ -581,6 +584,7 @@ def status() -> dict:
             "state_detail": detail,
             "state_since": meta.get("state_since"),
             "running_ended_at": meta.get("running_ended_at"),
+            "app_seen": app_seen[0],
             "agent_online": agent_online,
             "agent_last_seen": meta.get("last_seen"),
             "machine_connected": bool(latest.get("machine_connected")) and agent_online,
@@ -853,6 +857,8 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and path == "/api/health":
                 return self._json({"ok": True, "version": VERSION, "server_time": time.time()})
             if method == "GET" and path == "/api/status":
+                if (self.headers.get("X-Client") or "").startswith("ios-app"):
+                    app_seen[0] = time.time()      # the phone app is open: it looks after its own Live Activity
                 return self._json(status())
             if method == "GET" and path == "/api/alarms":
                 limit = max(1, min(500, int((qs.get("limit") or ["100"])[0])))

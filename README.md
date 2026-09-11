@@ -99,6 +99,7 @@ Environment options:
 | `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
 | `STANDBY_DELAY` | `4` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles). |
 | `BAR_CHANGE_ALERT` | `180` | A bar change taking longer than this many seconds sends a "bar change taking long" notification (usually a bar that didn't load). |
+| `LA_IDLE_END` | `600` | With the app closed, the lock screen Live Activity is taken away once the machine has been in standby or off this long (0 = never). It comes back on its own when the machine runs again, or when you open the app. |
 | `PUSH_RUNNING_GRACE` | `15` | For phones with **Only while the machine is running** switched on: how many seconds after the machine stops notifications still come through. |
 | `TZ` | | Your timezone, used for the "alarms today" and "bar changes today" counts. |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(blank)* | Apple push. See section 4. Put the `AuthKey_….p8` in the data folder. |

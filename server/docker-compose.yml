@@ -10,6 +10,7 @@ services:
     environment:
       - TZ=Europe/London
       - AGENT_TIMEOUT=30        # seconds without data from the PC before the machine shows OFF
+      - LA_IDLE_END=600         # with the app closed, drop the lock screen card after this long standby/off (0 = never)
       - BAR_CHANGE_ALERT=180    # seconds before a slow bar change sends a notification
       - PUSH_RUNNING_GRACE=15   # "only while running" phones still get alerts this long after a stop
       - STANDBY_DELAY=4         # seconds of standby before running -> standby shows (hides the gap between parts)
