@@ -198,9 +198,9 @@ final class LivePlayer: ObservableObject {
         }
         self.session = session
         let item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 1
+        // stay ~3 chunks (about 6 s) behind live, like the dashboard: a late chunk then doesn't pause the picture
         item.automaticallyPreservesTimeOffsetFromLive = true
-        item.configuredTimeOffsetFromLive = CMTime(seconds: 2, preferredTimescale: 600)
+        item.configuredTimeOffsetFromLive = CMTime(seconds: 6, preferredTimescale: 600)
         player.replaceCurrentItem(with: item)
         hasItem = true
         player.play()

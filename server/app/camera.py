@@ -87,7 +87,7 @@ import hmac as _hmac
 import re as _re
 import secrets as _secrets
 
-HLS_KEEP = 12            # segments kept per session (the playlist lists ~6)
+HLS_KEEP = 16            # segments kept per session (the playlist lists ~8)
 HLS_STALE = 12           # a session with no playlist update for this long has ended
 TOKEN_TTL = 3 * 3600
 
@@ -101,6 +101,7 @@ class LiveVideo:
         self.order: list[str] = []
         self.updated = 0.0
         self.started = 0.0
+        self._arrivals: list[tuple[float, int]] = []   # (time, bytes) of recent segments - for diagnostics
         self._secret = _secrets.token_bytes(32)   # tokens stop working after a restart; clients just ask again
 
     # ---- from the agent
@@ -111,6 +112,7 @@ class LiveVideo:
                 self.session, self.playlist = session, None
                 self.segments.clear()
                 self.order.clear()
+                self._arrivals.clear()
                 self.started = now
                 log.info("Live video session %s started", session)
             if name.endswith(".m3u8"):
@@ -119,6 +121,7 @@ class LiveVideo:
             else:
                 self.segments[name] = data
                 self.order.append(name)
+                self._arrivals = (self._arrivals + [(now, len(data))])[-10:]
                 while len(self.order) > HLS_KEEP:
                     self.segments.pop(self.order.pop(0), None)
 
@@ -161,5 +164,19 @@ class LiveVideo:
             return self.segments.get(name), "video/mp2t"
 
     def info(self) -> dict:
-        return {"session": self.session if self.ready else None, "ready": self.ready,
-                "age_s": round(time.time() - self.updated, 1) if self.updated else None}
+        d = {"session": self.session if self.ready else None, "ready": self.ready,
+             "age_s": round(time.time() - self.updated, 1) if self.updated else None}
+        with self.lock:
+            a = list(self._arrivals)
+            pl = (self.playlist or b"").decode("utf-8", "replace")
+        durs = [float(x) for x in _re.findall(r"#EXTINF:([\d.]+)", pl)]
+        if durs:
+            d["segment_s"] = round(sum(durs) / len(durs), 2)            # how long each chunk is
+        if len(a) >= 3:
+            gaps = [b[0] - x[0] for x, b in zip(a, a[1:])]
+            d["arrival_gap_s"] = round(sum(gaps) / len(gaps), 2)        # how often chunks arrive (should ~= segment_s)
+            d["arrival_gap_max_s"] = round(max(gaps), 2)                # the worst hiccup recently
+            span = a[-1][0] - a[0][0]
+            if span > 0:
+                d["kbps"] = round(sum(x[1] for x in a[1:]) * 8 / span / 1000)
+        return d

@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "HanwhaMonitor"
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 
 def normalize_url(url: str) -> str:

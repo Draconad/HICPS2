@@ -28,6 +28,7 @@ IDLE_SNAPSHOT = 60      # seconds between stills while nobody is watching
 LIVE_LINGER = 10        # keep streaming this long after the last "someone's watching" from the server
 MAX_WIDTH = 1280        # stills are scaled down to this width
 LIVE_STILL = 3          # seconds between stills while streaming video
+HLS_SEGMENT = 2         # seconds per video chunk: players buffer ~3 chunks, so a network hiccup doesn't pause playback
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW: no console flashing up
 
 
@@ -155,8 +156,9 @@ class CameraRelay:
         return ([ff, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "8000000",
                  "-i", camera_url(self.cfg),
                  "-map", "0:v:0", "-an"] + video +
-                ["-f", "hls", "-hls_time", "1", "-hls_list_size", "6", "-hls_flags", "delete_segments+independent_segments",
-                 "-method", "PUT", "-http_persistent", "0"] + headers + [push] +
+                ["-f", "hls", "-hls_time", str(HLS_SEGMENT), "-hls_list_size", "8",
+                 "-hls_flags", "delete_segments+independent_segments",
+                 "-method", "PUT", "-http_persistent", "1"] + headers + [push] +
                 ["-map", "0:v:0", "-an", "-vf", f"fps=1/{LIVE_STILL},scale='min({MAX_WIDTH},iw)':-2", "-q:v", "5",
                  "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"])
 

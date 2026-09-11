@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover
     from .camera import MAX_FRAME, Camera, LiveVideo
     from .push import PushService
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -388,6 +388,12 @@ def clear_history() -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = f"HanwhaMonitor/{VERSION}"
     protocol_version = "HTTP/1.1"
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError, TimeoutError):
+            pass   # e.g. the agent's kept-open video upload connection closing when ffmpeg stops
 
     def log_message(self, fmt, *args):   # quiet: the agent posts every couple of seconds
         pass

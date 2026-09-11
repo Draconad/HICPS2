@@ -213,8 +213,9 @@ async function camAttach(url) {
     await needHls();
     noPlayer = !window.Hls || !Hls.isSupported();
     if (noPlayer || camUrl !== url) { camBadge(); return; }
-    hls = new Hls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6, maxLiveSyncPlaybackRate: 1.5,
-                    backBufferLength: 10 });
+    // stay ~3 chunks behind live: a little more delay, but a late chunk no longer pauses the picture
+    hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 8, maxLiveSyncPlaybackRate: 1.1,
+                    backBufferLength: 10, lowLatencyMode: false });
     hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { camDetach(); } });   // the next poll re-attaches
     hls.loadSource(url);
     hls.attachMedia(vid);
@@ -230,6 +231,9 @@ still.onload = () => { $("camwait").hidden = true; };
 let camInfo = null;
 function camBadge() {
   const b = $("cambadge");
+  const i = camInfo || {};
+  b.title = i.segment_s ? `Video chunks: ${i.segment_s}s each, arriving every ${i.arrival_gap_s ?? "?"}s ` +
+                          `(slowest ${i.arrival_gap_max_s ?? "?"}s), ${i.kbps ?? "?"} kbit/s` : "";
   if (camPlaying) { b.className = "badge live"; b.textContent = "LIVE"; return; }
   b.className = "badge";
   const c = camInfo && camInfo.still;
