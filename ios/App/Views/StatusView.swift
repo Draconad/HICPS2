@@ -119,16 +119,11 @@ struct StateHeader: View {
                 .font(.system(size: 38, weight: .semibold))
                 .foregroundStyle(.white)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(s.headline.uppercased())
-                        .font(.system(size: 26, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    if s.isOverProducing {
-                        OverrunBadge(size: 13)
-                    }
-                }
+                Text(s.headline.uppercased())
+                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 if let d = s.stateDetail, !d.isEmpty {
                     Text(d)
                         .font(.subheadline.weight(.medium))
@@ -142,6 +137,9 @@ struct StateHeader: View {
                 }
             }
             Spacer(minLength: 0)
+            if s.isOverProducing {
+                OverrunBadge(size: 13)
+            }
         }
         .padding(18)
         .frame(maxWidth: .infinity)

@@ -40,9 +40,9 @@
   .status.s-standby { --st: var(--stby); --st-ink: #1d1500; }
   .status.s-off     { --st: #3a3d42; }
   .status.s-over    { --st: var(--run); --st-ink: #03140a; }
-  .status .overrun { display: inline-block; vertical-align: middle; margin-left: 12px; font-size: .42em; font-weight: 800;
-                     letter-spacing: .06em; padding: .22em .7em; border-radius: 999px; background: var(--accent); color: #1a0b00;
-                     box-shadow: 0 0 0 3px rgba(0,0,0,.18); }
+  .status .overrun { flex: none; align-self: center; margin-left: auto; font-size: clamp(14px, 2vw, 18px); font-weight: 800;
+                     letter-spacing: .08em; padding: 8px 16px; border-radius: 999px; background: var(--accent); color: #1a0b00; }
+  @media (max-width: 520px) { .status { flex-wrap: wrap; } .status .overrun { margin-left: 0; } }
   .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
   @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
@@ -124,6 +124,7 @@
       <div class="detail" id="stdetail">Loading…</div>
       <div class="since" id="stsince"></div>
     </div>
+    <div class="overrun" id="stover" hidden>OVERRUN</div>
   </section>
   <div class="banner" id="openapi" hidden>
     <b>The data API has no key.</b> This page needs a login, but anyone who can reach the server can still read
@@ -221,7 +222,8 @@ async function status() {
   const st = $("status");
   st.className = "status s-" + kind;
   $("sticon").innerHTML = icon;
-  $("ststate").innerHTML = esc(label) + (kind === "over" ? '<span class="overrun">OVERRUN</span>' : "");
+  $("ststate").textContent = label;
+  $("stover").hidden = kind !== "over";
   $("stdetail").textContent = detail;
   const since = bar ? s.bar_change_since : s.state_since;
   // like the app: "Since 14:02 · 1 hr, 45 min" (the phone's clock, corrected for drift)

@@ -148,6 +148,11 @@ class CommandClient:
                 raise RuntimeError("The work counter signal isn't set up yet (PC app > Signal finder).")
             on = bool(c.get("on"))
             self.collector.run_on_machine(lambda m: m.write_signal(sig, on))
+            # the machine's ladder may drive this address from the real setting and put it straight back
+            time.sleep(1.5)
+            if self.collector.run_on_machine(lambda m: m.read_signal(sig)) != on:
+                raise RuntimeError(f"The machine put {cfg.work_counter_signal} straight back - its own logic controls that "
+                                   "setting, so it can't be switched from here. Change it on the machine.")
             return f"Stop at required count {'on' if on else 'off'}"
 
         if kind in ("cycle_start", "cycle_stop", "continuous"):
