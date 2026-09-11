@@ -40,9 +40,10 @@ struct MachineLiveActivity: Widget {
                             .font(.headline.monospacedDigit())
                             .foregroundStyle(.white)
                         if let left = s.remaining {
-                            Text(left == 0 ? "done" : "\(left) to go")
+                            Text(s.isOverProducing ? "overrun" : (left == 0 ? "done" : "\(left) to go"))
                                 .font(.caption2.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(s.isOverProducing ? MachineStateKind.overProducingColor
+                                                                   : Color.white.opacity(0.6))
                         }
                     }
                     .padding(.trailing, 4)
@@ -81,7 +82,7 @@ struct MachineLiveActivity: Widget {
             } compactTrailing: {
                 Text(s.partsText)
                     .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(color)
+                    .foregroundStyle(s.isOverProducing && !context.isStale ? MachineStateKind.overProducingColor : color)
                     .minimumScaleFactor(0.7)
             } minimal: {
                 ZStack {
@@ -119,6 +120,9 @@ struct LockScreenView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .foregroundStyle(color)
+                    if s.isOverProducing && !stale {
+                        OverrunBadge(size: 10)
+                    }
                     if !s.program.isEmpty {
                         Text(s.program)
                             .font(.caption)

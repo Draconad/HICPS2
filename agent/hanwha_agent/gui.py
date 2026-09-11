@@ -713,7 +713,8 @@ class App:
         req_, parts_ = snap.get("parts_required"), snap.get("parts")
         if state == "running" and req_ and parts_ is not None and parts_ >= req_:
             detail = f"Running – Overrun ({parts_ - req_} past the required count)"
-        self.detail_lbl.configure(text=detail)
+        over = detail.startswith("Running – Overrun")
+        self.detail_lbl.configure(text=detail, fg="#f47521" if over else "#aab0ba")
         self.demo_lbl.configure(text="DEMO MODE — simulated data" if cfg.demo_mode else "")
         st = self.updater.status if self.updater else ""
         if st.startswith(("Update v", "Downloading", "Installing", "Refused")):

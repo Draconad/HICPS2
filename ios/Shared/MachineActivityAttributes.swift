@@ -79,11 +79,11 @@ struct MachineActivityAttributes: ActivityAttributes {
 
         var kind: MachineStateKind { barChange == true && state == .running ? .barChange : state }
         var isOverProducing: Bool { overProducing == true && kind == .running }
-        /// "Running – Overrun" or the plain state name
-        var headline: String { isOverProducing ? "Running – Overrun" : kind.label }
+        /// The state name (overrun stays "Running", in green, with an orange OVERRUN badge beside it)
+        var headline: String { kind.label }
         /// Short form for the Dynamic Island
-        var shortHeadline: String { isOverProducing ? "Overrun" : kind.label }
-        var headlineColor: Color { isOverProducing ? MachineStateKind.overProducingColor : kind.color }
+        var shortHeadline: String { kind.label }
+        var headlineColor: Color { kind.color }
         var barChangeStart: Date? { barChangeStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var cycleStart: Date? { cycleStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var updated: Date { Date(timeIntervalSince1970: updatedEpoch) }
@@ -119,6 +119,21 @@ struct MachineActivityAttributes: ActivityAttributes {
     }
 
     var machineName: String
+}
+
+/// Orange "OVERRUN" tag shown next to Running when the machine has gone past the required count.
+struct OverrunBadge: View {
+    var size: CGFloat = 11
+
+    var body: some View {
+        Text("OVERRUN")
+            .font(.system(size: size, weight: .heavy, design: .rounded))
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, size * 0.6)
+            .padding(.vertical, size * 0.2)
+            .background(MachineStateKind.overProducingColor, in: Capsule())
+            .fixedSize()
+    }
 }
 
 enum Fmt {

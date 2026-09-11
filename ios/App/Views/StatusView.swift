@@ -119,11 +119,16 @@ struct StateHeader: View {
                 .font(.system(size: 38, weight: .semibold))
                 .foregroundStyle(.white)
             VStack(alignment: .leading, spacing: 2) {
-                Text(s.headline.uppercased())
-                    .font(.system(size: 26, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
+                HStack(spacing: 8) {
+                    Text(s.headline.uppercased())
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if s.isOverProducing {
+                        OverrunBadge(size: 13)
+                    }
+                }
                 if let d = s.stateDetail, !d.isEmpty {
                     Text(d)
                         .font(.subheadline.weight(.medium))
@@ -144,7 +149,7 @@ struct StateHeader: View {
             LinearGradient(colors: [s.headlineColor, s.headlineColor.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: s.headlineColor.opacity(0.35), radius: 10, y: 4)
-        .animation(.easeInOut, value: s.headline)
+        .animation(.easeInOut, value: s.state)
     }
 }
 

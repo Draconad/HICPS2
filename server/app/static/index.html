@@ -39,7 +39,10 @@
   .status.s-bar     { --st: var(--bar); }
   .status.s-standby { --st: var(--stby); --st-ink: #1d1500; }
   .status.s-off     { --st: #3a3d42; }
-  .status.s-over    { --st: var(--accent); --st-ink: #1a0b00; }
+  .status.s-over    { --st: var(--run); --st-ink: #03140a; }
+  .status .overrun { display: inline-block; vertical-align: middle; margin-left: 12px; font-size: .42em; font-weight: 800;
+                     letter-spacing: .06em; padding: .22em .7em; border-radius: 999px; background: var(--accent); color: #1a0b00;
+                     box-shadow: 0 0 0 3px rgba(0,0,0,.18); }
   .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
   @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
@@ -203,7 +206,7 @@ async function status() {
   const now = s.server_time || Date.now() / 1000;
   const kind = bar ? "bar" : (s.state === "running" && s.over_producing) ? "over"
              : (["running", "standby", "alarm", "off"].includes(s.state) ? s.state : "off");
-  const label = { running: "Running", over: "Running – Overrun", bar: "Bar change", standby: "Standby",
+  const label = { running: "Running", over: "Running", bar: "Bar change", standby: "Standby",
                   alarm: "Alarm", off: "Off" }[kind];
   const icon = { running: "&#9654;", over: "&#9654;", bar: "&#8635;", standby: "&#10074;&#10074;", alarm: "&#9888;",
                  off: "&#9211;" }[kind];
@@ -218,7 +221,7 @@ async function status() {
   const st = $("status");
   st.className = "status s-" + kind;
   $("sticon").innerHTML = icon;
-  $("ststate").textContent = label;
+  $("ststate").innerHTML = esc(label) + (kind === "over" ? '<span class="overrun">OVERRUN</span>' : "");
   $("stdetail").textContent = detail;
   const since = bar ? s.bar_change_since : s.state_since;
   // like the app: "Since 14:02 · 1 hr, 45 min" (the phone's clock, corrected for drift)
