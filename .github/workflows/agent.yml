@@ -2,9 +2,18 @@ name: Windows agent (HanwhaMonitor.exe)
 
 on:
   workflow_dispatch:
+    inputs:
+      include_ffmpeg:
+        description: "Also include ffmpeg.exe (~100 MB, only needed once - it rarely changes)"
+        type: boolean
+        default: true
   push:
     branches: [main]
     paths: ["agent/**", ".github/workflows/agent.yml"]
+
+concurrency:
+  group: agent-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -31,6 +40,7 @@ jobs:
       # ffmpeg reads the camera's RTSP stream. A separate 64-bit program, so it works even though the app is
       # 32-bit (on 64-bit Windows). Not fatal if the download fails - the app works without the camera.
       - name: Download ffmpeg (camera)
+        if: ${{ inputs.include_ffmpeg }}   # manual runs only - saves ~100 MB of artifact storage per build
         continue-on-error: true
         shell: pwsh
         run: |
@@ -53,3 +63,5 @@ jobs:
           path: |
             agent/dist/HanwhaMonitor.exe
             agent/dist/ffmpeg.exe
+          retention-days: 7
+          if-no-files-found: warn

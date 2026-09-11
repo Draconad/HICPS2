@@ -10,6 +10,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,3 +31,15 @@ jobs:
           context: server
           push: true
           tags: ${{ env.IMAGE }}:latest
+          # a single plain image: no untagged attestation manifests, so the cleanup below can't remove a piece of :latest
+          provenance: false
+          sbom: false
+      # every build leaves the previous image behind untagged; they count against package storage
+      - name: Remove old image versions
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: hanwha-monitor-server
+          package-type: container
+          min-versions-to-keep: 3
+          delete-only-untagged-versions: true

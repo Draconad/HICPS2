@@ -1,6 +1,7 @@
 @echo off
 REM Push this folder to GitHub, start the cloud builds, and download the
 REM finished iPhone .ipa and Windows .exe into build-out\
+REM (the iPhone app is only built when you say yes - it uses the most build minutes)
 REM
 REM Double-click it. First time on a PC? Run github-auth.bat first.
 REM
@@ -79,7 +80,29 @@ git push --force -u origin main
 if errorlevel 1 goto push_failed
 
 echo.
-echo Pushed. Now waiting for the builds...
+echo Pushed.
+
+REM ---- iPhone app: only built when asked (macOS build minutes count 10x) ----
+set "LAST_IOS="
+for /f "tokens=*" %%A in ('gh run list --repo %REPO% --workflow ios.yml --status success --limit 1 --json headSha --jq ".[0].headSha" 2^>nul') do set "LAST_IOS=%%A"
+set "IOS_CHANGED=1"
+if not defined LAST_IOS goto ios_decided
+git diff --quiet %LAST_IOS% HEAD -- ios >nul 2>nul
+if not errorlevel 1 set "IOS_CHANGED=0"
+:ios_decided
+if "%IOS_CHANGED%"=="0" goto after_ios
+echo.
+echo The iPhone app has changed since its last build.
+echo An iPhone build uses about 100 of GitHub's 2,000 free build minutes a month,
+echo so only build it when you want to install the new version.
+choice /c YN /t 20 /d N /m "Build the iPhone app now (No in 20 s)"
+if errorlevel 2 goto after_ios
+gh workflow run ios.yml --repo %REPO% --ref main
+if errorlevel 1 echo Couldn't start the iPhone build - start it from the Actions tab on GitHub.
+:after_ios
+
+echo.
+echo Now waiting for the builds...
 echo.
 
 REM The waiting/downloading half is PowerShell (it has to read JSON). If it

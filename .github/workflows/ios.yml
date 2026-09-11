@@ -11,11 +11,15 @@ name: iOS app (signed .ipa, TestFlight, or unsigned)
 #   ASC_KEY_P8       full contents of the AuthKey_XXXX.p8 you downloaded
 #   APPLE_TEAM_ID    your 10-character Team ID (Membership details)
 
+# Manual only: macOS build minutes count 10x against GitHub's free allowance (an iPhone build costs ~100 of the
+# 2,000 monthly minutes on a private repo). push-to-github.bat asks whether to build it when the iPhone code changed,
+# or start it yourself: gh workflow run ios.yml  (or the Actions tab -> "iOS app" -> Run workflow).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -28,7 +32,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        # the release zip takes seconds; brew install can spend minutes updating Homebrew first
+        run: |
+          if curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+             && unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xg"; then
+            echo "$RUNNER_TEMP/xg/xcodegen/bin" >> "$GITHUB_PATH"
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
 
       - name: Generate Xcode project
         working-directory: ios
@@ -124,7 +135,7 @@ jobs:
         with:
           name: HanwhaMonitor-ipa
           path: ios/HanwhaMonitor.ipa
-          retention-days: 30
+          retention-days: 7
 
       # ------------------------------------------------------------------ unsigned fallback (iLoader)
       - name: Build unsigned (iLoader signs it)
@@ -166,7 +177,7 @@ jobs:
         with:
           name: HanwhaMonitor-ipa
           path: ios/HanwhaMonitor.ipa
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload build log
         if: always()
@@ -174,4 +185,4 @@ jobs:
         with:
           name: ios-build-log
           path: ios/build.log
-          retention-days: 30
+          retention-days: 7

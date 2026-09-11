@@ -38,6 +38,13 @@ Details:
 
 ---
 
+### GitHub build minutes
+A private repository gets 2,000 free GitHub Actions minutes a month. **iPhone builds run on Macs, which count 10×**, so one iPhone build is about 100 minutes. Windows builds count 2× (about 10 minutes each), and the server image about 2.
+- **The iPhone app is only built when you say so.** The push script asks when the iPhone code has changed since its last build, and defaults to No after 20 s. You can also start one from the Actions tab (**iOS app > Run workflow**), or with `gh workflow run ios.yml`.
+- **ffmpeg.exe is no longer re-uploaded with every Windows build**, which saves about 100 MB of storage each time. If you ever need it again, go to the Actions tab and run **Windows agent > Run workflow** (tick "Also include ffmpeg.exe").
+- Build downloads are deleted after 7 days, and only the last 3 server images are kept.
+- Usage is shown on GitHub under **Settings > Billing and plans > Usage**, and the allowance resets monthly. If it runs out, builds just stop until the reset; nothing is charged unless you've set a spending limit. Public repositories get unlimited free minutes.
+
 ## 2. Server on Unraid
 
 **Option A: build it on Unraid (no GitHub needed)**
