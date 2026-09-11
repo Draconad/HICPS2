@@ -144,6 +144,12 @@ struct SettingsView: View {
                     Text("Deletes cleared alarms from the server. Active alarms are kept.")
                 }
 
+                Section {
+                    NavigationLink("Background log") { BackgroundLogView() }
+                } footer: {
+                    Text("What the app did while the phone was locked. Share it if the Live Activity falls behind.")
+                }
+
                 Section("About") {
                     LabeledContent("App version", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
                     if let s = store.status {
@@ -189,5 +195,29 @@ struct SettingsView: View {
         } catch {
             testResult = (false, error.localizedDescription)
         }
+    }
+}
+
+
+struct BackgroundLogView: View {
+    @State private var text = EventLog.shared.text
+
+    var body: some View {
+        ScrollView {
+            Text(text.isEmpty ? "Nothing logged yet." : text)
+                .font(.caption2.monospaced())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .padding()
+        }
+        .navigationTitle("Background log")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                ShareLink(item: EventLog.shared.text)
+                Button("Clear") { EventLog.shared.clear(); text = "" }
+            }
+        }
+        .refreshable { text = EventLog.shared.text }
     }
 }

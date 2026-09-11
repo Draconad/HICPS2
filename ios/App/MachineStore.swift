@@ -46,6 +46,7 @@ final class MachineStore: ObservableObject {
     }
 
     func scenePhaseChanged(active: Bool, background: Bool) {
+        EventLog.shared.add(active ? "APP FOREGROUND" : (background ? "APP BACKGROUND (low power: \(ProcessInfo.processInfo.isLowPowerModeEnabled))" : "app inactive"))
         isForeground = active
         // Silent audio must already be playing before iOS suspends us, so start it while we're in front.
         if AppSettings.keepAlive { BackgroundKeeper.shared.start() }
@@ -67,7 +68,11 @@ final class MachineStore: ObservableObject {
             status = s
             error = nil
             lastSuccess = Date()
+            if !isForeground {
+                EventLog.shared.add("bg poll ok: \(s.state.rawValue) \(s.parts.map { String($0) } ?? "-")/\(s.partsRequired.map { String($0) } ?? "-")")
+            }
         } catch {
+            EventLog.shared.add("poll FAILED\(isForeground ? "" : " (bg)"): \(error.localizedDescription)")
             self.error = error.localizedDescription
         }
         await LiveActivityManager.shared.sync(status: error == nil ? status : nil, reachable: error == nil,
@@ -108,6 +113,7 @@ final class MachineStore: ObservableObject {
     }
 
     func backgroundRefresh() async {
+        EventLog.shared.add("BGAppRefresh task woke the app")
         scheduleAppRefresh()
         await refresh()
     }

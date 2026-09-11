@@ -21,6 +21,7 @@ final class BackgroundKeeper {
     var isPlaying: Bool { player?.isPlaying ?? false }
 
     private func noteStop(_ reason: String) {
+        EventLog.shared.add("silent audio stopped: \(reason)")
         stopCount += 1
         lastStopReason = reason
         lastStopDate = Date()
@@ -86,9 +87,10 @@ final class BackgroundKeeper {
                 p.prepareToPlay()
                 player = p
             }
-            player?.play()
+            let ok = player?.play() ?? false
+            EventLog.shared.add("silent audio play -> \(ok)")
         } catch {
-            print("BackgroundKeeper failed: \(error)")
+            EventLog.shared.add("silent audio FAILED: \(error.localizedDescription)")
         }
     }
 

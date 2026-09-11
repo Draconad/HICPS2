@@ -49,6 +49,7 @@ final class LiveActivityManager: ObservableObject {
         stateTask?.cancel()
         stateTask = Task { [weak self] in
             for await st in a.activityStateUpdates {
+                EventLog.shared.add("LA state -> \(st)")
                 if st == .ended || st == .dismissed {
                     // This Task inherits @MainActor from adopt(), so no MainActor.run hop is needed
                     // (and referencing the weak `self` capture from a nested @Sendable closure is an error).
@@ -115,6 +116,7 @@ final class LiveActivityManager: ObservableObject {
                                          content: ActivityContent(state: state, staleDate: staleDate()),
                                          pushType: nil)
             adopt(a, startedAt: Date())
+            EventLog.shared.add("LA started")
             lastPushed = state
             lastPushTime = Date()
             lastError = nil
@@ -122,6 +124,7 @@ final class LiveActivityManager: ObservableObject {
             lastAttempt = "started \(Date().formatted(date: .omitted, time: .shortened))"
         } catch {
             lastAttempt = "failed"
+            EventLog.shared.add("LA start FAILED: \(error)")
             lastError = "Couldn't start Live Activity: \(error.localizedDescription) [\(String(describing: error))]"
         }
     }
@@ -189,6 +192,7 @@ final class LiveActivityManager: ObservableObject {
                                  sound: .default)
             : nil
         await a.update(ActivityContent(state: new, staleDate: staleDate()), alertConfiguration: alert)
+        EventLog.shared.add("LA update pushed\(UIApplication.shared.applicationState == .active ? "" : " (bg)"): \(new.state.rawValue) \(new.partsText)\(changed ? "" : " [heartbeat]")")
         lastPushed = new
         lastPushTime = Date()
     }
