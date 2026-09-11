@@ -113,6 +113,11 @@ class CommandClient:
             if not (cfg.camera_enabled and cfg.camera_ptz):
                 raise RuntimeError("Pan/tilt is switched off in the PC app (Camera tab).")
             x, y = float(c.get("x", 0)), float(c.get("y", 0))
+            # upside-down mounting: the picture is flipped (in the Tapo app) but the motors aren't
+            if cfg.camera_reverse_pan:
+                x = -x
+            if cfg.camera_reverse_tilt:
+                y = -y
             with self._ptz_lock:          # one move at a time
                 try:
                     self._ptz_client().move(x, y)

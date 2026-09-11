@@ -14,6 +14,7 @@
     --run: #30c24a; --bar: #2f8cff; --stby: #f2b90c; --alarm: #ff453a; --off: #8a8f98; --accent: #f47521;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
   main { max-width: 880px; margin: 0 auto; padding: 20px 16px 40px; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -91,6 +92,8 @@
   .cam .tool { width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff;
                font-size: 16px; cursor: pointer; display: grid; place-items: center; }
   .cam .tool:hover { background: rgba(0,0,0,.8); }
+  .ptz { opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .cam:hover .ptz, .cam.touched .ptz, .ptz:focus-within { opacity: 1; pointer-events: auto; }
   .ptz { position: absolute; right: 10px; bottom: 10px; display: grid; grid-template-columns: repeat(3, 34px);
          grid-template-rows: repeat(3, 34px); gap: 2px; padding: 4px; border-radius: 50%; background: rgba(0,0,0,.5); }
   .ptz button { border: 0; background: transparent; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
@@ -437,6 +440,17 @@ async function ptz(body) {
   } catch (e) { $("camnote").innerHTML = `<span class="camerr">Couldn't reach the server</span>`; }
   ptzBusy = false; $("ptzdot").style.color = "";
   document.querySelectorAll("#ptz button, #presets button").forEach(b => b.disabled = false);
+}
+// the pan/tilt pad only shows while the mouse is over the video; on a touch screen, tap the video to show it
+{
+  const cam = document.querySelector(".cam");
+  let hideTimer = null;
+  cam.addEventListener("pointerdown", e => {
+    if (e.pointerType === "mouse") return;
+    cam.classList.add("touched");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => cam.classList.remove("touched"), 5000);
+  });
 }
 document.querySelectorAll("#ptz button").forEach(b =>
   b.onclick = () => ptz({ type: "ptz", x: +b.dataset.x, y: +b.dataset.y }));

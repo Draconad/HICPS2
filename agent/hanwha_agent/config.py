@@ -56,6 +56,8 @@ class Config:
     camera_transcode: bool = False    # re-encode to H.264 (H.265 cameras, or for perfectly even frames)
     camera_audio: bool = True         # include the camera's microphone in the live video (muted until unmuted)
     camera_ptz: bool = True           # pan/tilt buttons in the app/dashboard (ONVIF, camera account)
+    camera_reverse_pan: bool = False  # camera mounted upside down: the motors move the opposite way to the picture
+    camera_reverse_tilt: bool = False
     camera_retime: bool = False       # stamp frames with their arrival time (fixes cameras with jumpy timestamps)
     ffmpeg_path: str = ""             # blank = ffmpeg.exe next to the .exe, or on PATH
     server_url: str = "http://tower.local:8420"

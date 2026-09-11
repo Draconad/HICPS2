@@ -402,6 +402,15 @@ class App:
             self.vars[key] = v
             ttk.Checkbutton(row, text=label, variable=v).pack(side="left", padx=(0, 18))
         r += 1
+        row = tk.Frame(page, bg=BG)
+        row.grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        for key, label in (("camera_reverse_pan", "Reverse pan (left/right)"),
+                           ("camera_reverse_tilt", "Reverse tilt (up/down)")):
+            v = tk.BooleanVar(value=bool(getattr(self.cfg, key)))
+            self.vars[key] = v
+            ttk.Checkbutton(row, text=label, variable=v).pack(side="left", padx=(0, 18))
+        ttk.Label(row, text="camera mounted upside down: tick both", style="Hint.TLabel").pack(side="left")
+        r += 1
         var = tk.BooleanVar(value=self.cfg.camera_retime)
         self.vars["camera_retime"] = var
         ttk.Checkbutton(page, text="Fix camera timing (if the video stutters - see Check video timing)",
