@@ -26,7 +26,8 @@ final class MachineStore: ObservableObject {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if AppSettings.keepAlive { BackgroundKeeper.shared.ensurePlaying() }
+                if AppSettings.keepAlive && !PushManager.shared.serverHandlesPush { BackgroundKeeper.shared.ensurePlaying() }
+                if PushManager.shared.serverHandlesPush && BackgroundKeeper.shared.isRunning { BackgroundKeeper.shared.stop() }
                 if !self.isForeground { self.lastBackgroundPoll = Date() }
                 await self.refresh()
                 let wait = self.isForeground ? AppSettings.pollInterval : AppSettings.backgroundInterval
@@ -49,7 +50,7 @@ final class MachineStore: ObservableObject {
         EventLog.shared.add(active ? "APP FOREGROUND" : (background ? "APP BACKGROUND (low power: \(ProcessInfo.processInfo.isLowPowerModeEnabled))" : "app inactive"))
         isForeground = active
         // Silent audio must already be playing before iOS suspends us, so start it while we're in front.
-        if AppSettings.keepAlive { BackgroundKeeper.shared.start() }
+        if AppSettings.keepAlive && !PushManager.shared.serverHandlesPush { BackgroundKeeper.shared.start() }
         if active {
             // A fresh poll straight away when the app comes back to the front
             Task { await refresh() }

@@ -362,7 +362,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(push.info())
                 if method == "POST" and path == "/api/push/register":
                     return self._json(push.register(body.get("kind", ""), body.get("token", ""), body.get("activity_id"),
-                                                    body.get("env"), body.get("prefs")))
+                                                    body.get("env"), body.get("prefs"), body.get("bundle_id")))
                 if method == "POST" and path == "/api/push/unregister":
                     push.unregister(body.get("token", ""), body.get("activity_id", ""))
                     return self._json({"ok": True})

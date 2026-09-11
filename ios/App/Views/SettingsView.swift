@@ -12,7 +12,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.apiKey) private var apiKey = ""
     @AppStorage(SettingsKey.pollInterval) private var pollInterval = 3.0
     @AppStorage(SettingsKey.backgroundInterval) private var backgroundInterval = 10.0
-    @AppStorage(SettingsKey.keepAlive) private var keepAlive = false
+    @AppStorage(SettingsKey.keepAlive) private var keepAlive = true
     @AppStorage(SettingsKey.liveActivity) private var liveActivity = true
     @AppStorage(SettingsKey.notifyAlarms) private var notifyAlarms = true
     @AppStorage(SettingsKey.notifyStopped) private var notifyStopped = false
@@ -99,7 +99,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Silent-audio keep-alive (no push)", isOn: $keepAlive)
+                    Toggle("Silent-audio keep-alive when push isn't working", isOn: $keepAlive)
                         .onChange(of: keepAlive) { on in
                             if on { BackgroundKeeper.shared.start() } else { BackgroundKeeper.shared.stop() }
                         }
@@ -115,7 +115,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Updates")
                 } footer: {
-                    Text("With Apple push working (see Push below) the server keeps the Live Activity and alerts up to date on its own, so leave this OFF. It's only a fallback for builds without push: it keeps the app awake by playing silent audio.")
+                    Text("When Apple push is working (see Push below) the server keeps the Live Activity and alerts current on its own and this switches itself off. If push isn't available, it keeps the app awake in the background by playing silent audio.")
                 }
 
                 Section {

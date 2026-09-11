@@ -172,7 +172,20 @@ What push changes:
 
 *Later, if you want automatic updates:* create the app in App Store Connect (**Apps → + → New App**, bundle ID `com.jtquayle.hicps2`). Then add a repository **variable** (Settings → Secrets and variables → Actions → Variables) `IOS_DISTRIBUTION` = `testflight`. From then on, builds go to TestFlight instead of producing an `.ipa`.
 
-### Without push: iLoader (free Apple ID)
+### Paid Apple ID + iLoader (quickest to try)
+
+Keep installing with **iLoader**, but sign in with your **paid** Apple ID. The GitHub secrets aren't needed for this; the build stays the unsigned `.ipa`. Push may or may not work this way, because it depends on whether iLoader asks Apple for the push permission. The app will tell you which.
+
+1. **Server** (you need this for push whichever way you install):
+   - On developer.apple.com, go to **Keys → +**, tick **Apple Push Notifications service (APNs)**, download `AuthKey_XXXXXXXXXX.p8` and note its **Key ID**. Also note your **Team ID** (Membership details).
+   - Copy the `.p8` into `/mnt/user/appdata/hanwha-monitor/data/`. Add the container variables `APNS_KEY_ID` and `APNS_TEAM_ID`, then rebuild the container. The log should say `push ON`.
+   - You don't need `APNS_TOPIC`. The app tells the server its real bundle ID, even if iLoader renames it.
+2. Install `HanwhaMonitor-bN.ipa` with iLoader using the paid Apple ID. The app is then signed for a year instead of 7 days.
+3. Open HiCPS-2 → Settings → **Push (Apple)**:
+   - **Working**: iLoader kept push. Tap *Send test notification* to confirm. The Live Activity and alarms are now updated by the server, and the silent-audio fallback switches itself off.
+   - **"Push not available … aps-environment"**: iLoader dropped push. Everything still works as before on the silent-audio fallback. For real push, use the signed `.ipa` route above (GitHub secrets + iMazing/3uTools).
+
+### Free Apple ID: iLoader without push
 
 If the GitHub secrets aren't set, the build makes an unsigned `HanwhaMonitor-bN.ipa` instead:
 

@@ -30,6 +30,9 @@ class PushService:
                     token TEXT PRIMARY KEY, kind TEXT NOT NULL, activity_id TEXT, env TEXT DEFAULT 'production',
                     prefs TEXT, created REAL, updated REAL, last_content TEXT, last_push REAL);
             """)
+            cols = {r[1] for r in db.execute("PRAGMA table_info(push_tokens)")}
+            if "topic" not in cols:
+                db.execute("ALTER TABLE push_tokens ADD COLUMN topic TEXT")
         self._wake = threading.Event()
         self._tick_lock = threading.Lock()   # the background loop and manual calls must not overlap
         self.last_error = ""
@@ -38,7 +41,7 @@ class PushService:
 
     # ------------------------------------------------------------------ registry
     def register(self, kind: str, token: str, activity_id: str | None = None, env: str | None = None,
-                 prefs: dict | None = None) -> dict:
+                 prefs: dict | None = None, topic: str | None = None) -> dict:
         if kind not in ("alert", "la", "la_start") or not token or len(token) > 400:
             raise ValueError("bad kind or token")
         now = time.time()
@@ -46,11 +49,12 @@ class PushService:
             row = self.db.execute("SELECT token FROM push_tokens WHERE token=?", (token,)).fetchone()
             if row:
                 self.db.execute("UPDATE push_tokens SET kind=?, activity_id=COALESCE(?, activity_id), env=COALESCE(?, env),"
-                                " prefs=COALESCE(?, prefs), updated=? WHERE token=?",
-                                (kind, activity_id, env, json.dumps(prefs) if prefs is not None else None, now, token))
+                                " prefs=COALESCE(?, prefs), topic=COALESCE(?, topic), updated=? WHERE token=?",
+                                (kind, activity_id, env, json.dumps(prefs) if prefs is not None else None, topic, now, token))
             else:
-                self.db.execute("INSERT INTO push_tokens(token,kind,activity_id,env,prefs,created,updated) VALUES(?,?,?,?,?,?,?)",
-                                (token, kind, activity_id, env or "production", json.dumps(prefs or {}), now, now))
+                self.db.execute("INSERT INTO push_tokens(token,kind,activity_id,env,prefs,topic,created,updated)"
+                                " VALUES(?,?,?,?,?,?,?,?)",
+                                (token, kind, activity_id, env or "production", json.dumps(prefs or {}), topic, now, now))
             if kind == "la" and activity_id:
                 # a new token for an activity replaces its old one
                 self.db.execute("DELETE FROM push_tokens WHERE kind='la' AND activity_id=? AND token<>?", (activity_id, token))
@@ -111,10 +115,13 @@ class PushService:
     # ------------------------------------------------------------------ sending
     def _send(self, row, payload: dict, push_type: str, priority: int, collapse: str | None = None) -> bool:
         env = row["env"] or "production"
-        status, reason = self.apns.send(row["token"], payload, push_type, env=env, priority=priority, collapse_id=collapse)
+        topic = row["topic"] if "topic" in row.keys() else None
+        status, reason = self.apns.send(row["token"], payload, push_type, env=env, priority=priority,
+                                        collapse_id=collapse, topic=topic)
         if status == 400 and reason == "BadDeviceToken":
             other = "sandbox" if env == "production" else "production"
-            status, reason = self.apns.send(row["token"], payload, push_type, env=other, priority=priority, collapse_id=collapse)
+            status, reason = self.apns.send(row["token"], payload, push_type, env=other, priority=priority,
+                                            collapse_id=collapse, topic=topic)
             if status == 200:
                 with self.lock:
                     self.db.execute("UPDATE push_tokens SET env=? WHERE token=?", (other, row["token"]))

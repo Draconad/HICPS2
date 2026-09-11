@@ -101,7 +101,8 @@ struct APIClient {
     /// Returns whether the server has Apple push configured.
     func pushRegister(kind: String, token: String, activityID: String?, env: String, prefs: [String: Bool]?) async throws -> Bool {
         struct R: Decodable { var ok: Bool; var pushEnabled: Bool? }
-        var body: [String: Any] = ["kind": kind, "token": token, "env": env]
+        var body: [String: Any] = ["kind": kind, "token": token, "env": env,
+                                   "bundle_id": Bundle.main.bundleIdentifier ?? ""]
         if let activityID { body["activity_id"] = activityID }
         if let prefs { body["prefs"] = prefs }
         return try await post("/api/push/register", body, as: R.self).pushEnabled ?? false

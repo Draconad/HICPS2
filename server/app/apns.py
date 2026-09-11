@@ -46,8 +46,9 @@ class APNs:
         self.enabled = self._setup()
 
     def _setup(self) -> bool:
-        missing = [n for n, v in (("APNS_KEY_ID", self.key_id), ("APNS_TEAM_ID", self.team_id),
-                                  ("APNS_TOPIC", self.topic)) if not v]
+        # APNS_TOPIC is optional: the app reports its real bundle ID when it registers
+        # (sideloading tools like iLoader may change it).
+        missing = [n for n, v in (("APNS_KEY_ID", self.key_id), ("APNS_TEAM_ID", self.team_id)) if not v]
         if missing:
             self.error = "not configured (missing " + ", ".join(missing) + ")"
             return False
@@ -93,11 +94,12 @@ class APNs:
 
     # -------------------------------------------------------------------- send
     def send(self, token: str, payload: dict, push_type: str, env: str = "production",
-             priority: int = 10, expiration: int | None = None, collapse_id: str | None = None) -> tuple[int, str]:
+             priority: int = 10, expiration: int | None = None, collapse_id: str | None = None,
+             topic: str | None = None) -> tuple[int, str]:
         """Returns (http status, reason). 200 = delivered to Apple."""
         if not self.enabled:
             return 0, self.error
-        topic = self.topic + (".push-type.liveactivity" if push_type == "liveactivity" else "")
+        topic = (topic or self.topic) + (".push-type.liveactivity" if push_type == "liveactivity" else "")
         headers = {
             "authorization": f"bearer {self._token()}",
             "apns-topic": topic,

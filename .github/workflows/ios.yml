@@ -147,7 +147,11 @@ jobs:
           for appex in "$app"/PlugIns/*.appex; do
             codesign --force --sign - --timestamp=none --generate-entitlement-der "$appex"
           done
-          codesign --force --sign - --timestamp=none --generate-entitlement-der "$app"
+          # The app's entitlements (push, time-sensitive) go into the signature so sideloading tools like
+          # iLoader can see the app wants push and request it for your App ID.
+          codesign --force --sign - --timestamp=none --generate-entitlement-der \
+            --entitlements App/HanwhaMonitor.entitlements "$app"
+          codesign -d --entitlements - "$app" || true
           for bundle in "$app" "$app"/PlugIns/*.appex; do
             for key in CFBundleVersion CFBundleShortVersionString CFBundleIdentifier; do
               echo "$(basename "$bundle") $key = $(plutil -extract "$key" raw -o - "$bundle/Info.plist")"
