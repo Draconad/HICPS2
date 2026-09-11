@@ -404,6 +404,11 @@ struct CycleCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let avg = s.program?.avgCycleS {
+                Text("Program avg \(Fmt.duration(avg))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

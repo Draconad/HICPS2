@@ -21,7 +21,7 @@
   .back { font-weight: 600; font-size: 14px; }
   .sub, .muted { color: var(--muted); font-size: 13px; }
   .layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
-  @media (max-width: 600px) { #list td:nth-child(5), .layout th:nth-child(5) { display: none; } td, th { padding: 9px 6px; } }
+  @media (max-width: 600px) { #list td:nth-child(6), .layout thead tr:first-child th:nth-child(6) { display: none; } td, th { padding: 9px 6px; } }
   @media (min-width: 980px) { .layout { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; }
                               #detail { position: sticky; top: 16px; } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
@@ -78,8 +78,8 @@
     <section>
       <div class="card wrap">
         <table>
-          <thead><tr><th>Program</th><th>Name</th><th>Parts / bar</th><th>Bars</th><th>Last bar</th></tr></thead>
-          <tbody id="list"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+          <thead><tr><th>Program</th><th>Name</th><th>Parts / bar</th><th>Avg cycle</th><th>Bars</th><th>Last bar</th></tr></thead>
+          <tbody id="list"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
       <div class="addrow">
@@ -95,6 +95,7 @@
         <div class="fig"><div class="k">Parts / bar in use</div><div class="v" id="fuse">—</div></div>
         <div class="fig"><div class="k">Learnt</div><div class="v" id="flearnt">—</div></div>
         <div class="fig"><div class="k">Bars recorded</div><div class="v" id="fbars">—</div></div>
+        <div class="fig"><div class="k">Average cycle</div><div class="v" id="fcycle">—</div></div>
       </div>
       <label for="fname">Name</label>
       <input id="fname" maxlength="40" placeholder="e.g. EMS301">
@@ -129,6 +130,8 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 const when = ts => ts ? new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "—";
 const dur = s => { s = Math.round(s); if (s >= 86400) return `${Math.floor(s / 86400)}d ${Math.floor(s % 86400 / 3600)}h`;
   if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`; return `${Math.floor(s / 60)}m`; };
+const mmss = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
 const ppbText = p => (p.ppb_manual || p.ppb_learnt) ? "~" + Math.round(p.ppb_manual || p.ppb_learnt) : "—";
 
 async function api(path, opts) {
@@ -149,9 +152,10 @@ async function loadList() {
       <td class="code">${esc(p.program)}${p.loaded ? '<span class="tag loaded">LOADED</span>' : ""}</td>
       <td>${esc(p.name || "")}</td>
       <td class="num">${ppbText(p)}${p.ppb_manual ? '<span class="tag manual">SET</span>' : ""}</td>
+      <td class="num">${p.avg_cycle_s ? mmss(p.avg_cycle_s) : "—"}</td>
       <td class="num">${p.bars_recorded || 0}</td>
       <td class="num muted">${when(p.last_bar_at)}</td>
-    </tr>`).join("") : `<tr><td colspan="5" class="empty">No programs yet - they appear once one has been loaded on the machine.</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="6" class="empty">No programs yet - they appear once one has been loaded on the machine.</td></tr>`;
   $("list").querySelectorAll("tr[data-k]").forEach(tr => tr.onclick = () => select(tr.dataset.k));
   if (selected) loadDetail(selected);
 }
@@ -176,6 +180,8 @@ async function loadDetail(k) {
   $("flearnt").textContent = d.ppb_learnt ? `~${Math.round(d.ppb_learnt)}` : "—";
   $("flearnt").title = d.ppb_learnt ? `Average of the last ${d.ppb_learnt_bars} bars (odd ones left out)` : "";
   $("fbars").textContent = d.bars_recorded;
+  $("fcycle").textContent = d.avg_cycle_s ? mmss(d.avg_cycle_s) : "—";
+  $("fcycle").title = d.avg_cycle_s ? `Average of the last ${d.avg_cycle_parts} parts (stops and odd ones left out); ${d.cycles_recorded} stored` : "";
   $("fname").value = d.name || "";
   $("fppb").value = d.ppb_manual ?? "";
   $("fppb").placeholder = d.ppb_learnt ? `blank = use the learnt ~${Math.round(d.ppb_learnt)}` : "blank = learn it from the machine";
@@ -221,12 +227,12 @@ $("addbtn").onclick = async () => {
   await loadList();
   // not stored until something is saved for it
   if (!$("list").querySelector(`tr[data-k="${k}"]`)) {
-    $("list").insertAdjacentHTML("afterbegin", `<tr data-k="${k}" class="sel"><td class="code">${k}</td><td class="muted">new</td><td>—</td><td>0</td><td>—</td></tr>`);
+    $("list").insertAdjacentHTML("afterbegin", `<tr data-k="${k}" class="sel"><td class="code">${k}</td><td class="muted">new</td><td>—</td><td>—</td><td>0</td><td>—</td></tr>`);
   }
   loadDetail(k); $("fname").focus();
 };
 $("addkey").onkeydown = e => { if (e.key === "Enter") $("addbtn").click(); };
-loadList().catch(e => $("list").innerHTML = `<tr><td colspan="5" class="empty">Couldn't load: ${esc(e.message)}</td></tr>`);
+loadList().catch(e => $("list").innerHTML = `<tr><td colspan="6" class="empty">Couldn't load: ${esc(e.message)}</td></tr>`);
 </script>
 </body>
 </html>

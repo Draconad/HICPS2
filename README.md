@@ -161,6 +161,7 @@ Click **Name** on the Program card on the dashboard, or tap **Name** on it in th
 The **Program info** button at the top of the dashboard, or Settings > **Program info** in the app, lists every program with a name, notes or bars on record. The loaded one is shown first. Open a program to:
 - set its **name** (shown as O3110 - EMS301)
 - see the **learnt parts per bar**, or set your own figure to use instead
+- see its **average cycle time**, part to part over its last 50 parts with stops and odd parts left out. When a program is loaded, the finish time uses this until the first new part is made.
 - keep **notes**, e.g. bar size, material or setup
 - see its **recorded bars** and remove a bad one, or forget them all after changing the bar length
 

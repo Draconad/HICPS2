@@ -8,6 +8,8 @@ struct ProgramInfo: Decodable, Equatable {
     var key: String?            // "O3110" - what names and bar counts are stored against
     var customName: String?     // your own name for it ("EMS301"), set in the app or on the dashboard
     var label: String?          // "O3110 - EMS301"
+    var avgCycleS: Double?      // average part-to-part time of this program's recent parts
+    var avgCycleParts: Int?
 
     var title: String {
         if let label, !label.isEmpty { return label }
@@ -191,6 +193,9 @@ struct ProgramRecord: Decodable, Equatable, Identifiable {
     var ppbManual: Double?          // parts per bar you typed in (used instead of the learnt one)
     var ppbLearnt: Double?
     var ppbLearntBars: Int?
+    var avgCycleS: Double?
+    var avgCycleParts: Int?
+    var cyclesRecorded: Int?
     var barsRecorded: Int?
     var firstBarAt: Double?
     var lastBarAt: Double?

@@ -1,5 +1,9 @@
 import SwiftUI
 
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
 /// Settings > Program info: every program the server knows, with your name for it and its parts per bar.
 struct ProgramListView: View {
     @State private var list: [ProgramRecord] = []
@@ -91,8 +95,9 @@ private struct ProgramRow: View {
                             .background(MachineStateKind.running.color, in: Capsule())
                     }
                 }
-                Text(p.lastBarAt.map { "\(p.barsRecorded ?? 0) bars · last " + Fmt.dateTime(Date(timeIntervalSince1970: $0)) }
-                     ?? "No bars recorded yet")
+                Text([p.avgCycleS.map { "cycle " + Fmt.duration($0) },
+                      p.lastBarAt.map { "\(p.barsRecorded ?? 0) bars · last " + Fmt.dateTime(Date(timeIntervalSince1970: $0)) }]
+                        .compactMap { $0 }.joined(separator: " · ").nonEmpty ?? "Nothing recorded yet")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -149,6 +154,17 @@ struct ProgramDetailView: View {
             } footer: {
                 Text(manualOn ? "Your figure is used for the bars-needed estimate instead of the learnt one."
                               : "Learnt from the machine, from one bar change to the next. Odd bars are left out.")
+            }
+
+            Section {
+                LabeledContent("Average") {
+                    Text(rec?.avgCycleS.map { Fmt.duration($0) + " (last \(rec?.avgCycleParts ?? 0) parts)" } ?? "Not yet")
+                        .monospacedDigit()
+                }
+            } header: {
+                Text("Cycle time")
+            } footer: {
+                Text("Part to part, learnt from the machine. Stops and odd parts are left out. Used for the finish time until the first part after the program is loaded.")
             }
 
             Section("Notes") {

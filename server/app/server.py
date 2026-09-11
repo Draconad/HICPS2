@@ -105,6 +105,10 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS bars_program ON bars(program, ended_at DESC);
         -- your own names for programs ("EMS301"), shown after the number: O3110 - EMS301
         CREATE TABLE IF NOT EXISTS programs (program TEXT PRIMARY KEY, name TEXT NOT NULL, updated REAL);
+        -- part-to-part cycle times per program (the most recent CYCLE_KEEP of each are kept)
+        CREATE TABLE IF NOT EXISTS cycles (id INTEGER PRIMARY KEY AUTOINCREMENT, program TEXT NOT NULL, cycle_s REAL NOT NULL,
+            at REAL NOT NULL, demo INTEGER);
+        CREATE INDEX IF NOT EXISTS cycles_program ON cycles(program, at DESC);
     """)
     cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
     if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
@@ -327,12 +331,46 @@ def program_label(key: str | None) -> str | None:
 
 
 def program_info() -> dict:
-    """The running program plus its key, your name for it and the combined label."""
+    """The running program plus its key, your name for it, the combined label and its average cycle time."""
     prog = dict(latest.get("program") or {})
     key = program_key(prog)
     if key:
-        prog.update(key=key, custom_name=program_name(key), label=program_label(key))
+        avg, n = learnt_cycle(key, bool(latest.get("demo")))
+        prog.update(key=key, custom_name=program_name(key), label=program_label(key), avg_cycle_s=avg, avg_cycle_parts=n)
     return prog
+
+
+# ---- average cycle time per program -------------------------------------------------------------------
+CYCLE_AVG_OVER = 50       # parts
+CYCLE_KEEP = 500          # stored per program
+
+
+def record_cycle(snap: dict, now: float, demo: bool):
+    """A part was just made: store its part-to-part time against the program (only a clean count-up by 1-5)."""
+    key = program_key(snap.get("program"))
+    cyc = snap.get("last_cycle_s")
+    kind, n = _bar_count(snap)
+    pkind, pn = _bar_count(latest)
+    if (not key or not cyc or not 0.5 <= cyc <= 7200 or snap.get("bar_change") or kind is None or kind != pkind
+            or pn is None or not 1 <= n - pn <= 5 or program_key(latest.get("program")) != key):
+        return
+    db.execute("INSERT INTO cycles(program,cycle_s,at,demo) VALUES(?,?,?,?)", (key, float(cyc), now, int(demo)))
+    db.execute("DELETE FROM cycles WHERE program=? AND id NOT IN (SELECT id FROM cycles WHERE program=? "
+               "ORDER BY at DESC LIMIT ?)", (key, key, CYCLE_KEEP))
+
+
+def learnt_cycle(key: str | None, demo: bool) -> tuple[float | None, int]:
+    """Average part-to-part time of the program's recent parts, leaving out odd ones (a stop, a slow first part)."""
+    if not key:
+        return None, 0
+    vals = [r["cycle_s"] for r in db.execute(
+        "SELECT cycle_s FROM cycles WHERE program=? AND COALESCE(demo,0)=? ORDER BY at DESC LIMIT ?",
+        (key, int(demo), CYCLE_AVG_OVER))]
+    if not vals:
+        return None, 0
+    med = sorted(vals)[len(vals) // 2]
+    good = [v for v in vals if 0.75 * med <= v <= 1.25 * med] or vals
+    return round(sum(good) / len(good), 1), len(good)
 
 
 def _bar_count(snap: dict):
@@ -394,7 +432,11 @@ def program_row(key: str, current: str | None = None) -> dict:
     learnt, n = learnt_parts_per_bar(key, False)
     agg = db.execute("SELECT COUNT(*) n, MAX(ended_at) last, MIN(started_at) first FROM bars "
                      "WHERE program=? AND COALESCE(demo,0)=0", (key,)).fetchone()
+    cyc, cyc_n = learnt_cycle(key, False)
     return {"program": key, "name": (r["name"] or None) if r else None, "label": program_label(key),
+            "avg_cycle_s": cyc, "avg_cycle_parts": cyc_n,
+            "cycles_recorded": db.execute("SELECT COUNT(*) n FROM cycles WHERE program=? AND COALESCE(demo,0)=0",
+                                          (key,)).fetchone()["n"],
             "notes": (r["notes"] or None) if r else None, "ppb_manual": r["ppb_manual"] if r else None,
             "ppb_learnt": learnt, "ppb_learnt_bars": n, "bars_recorded": agg["n"] or 0,
             "first_bar_at": agg["first"], "last_bar_at": agg["last"], "loaded": key == current}
@@ -464,8 +506,9 @@ def ingest(snap: dict) -> dict:
         except Exception:
             db.execute("ROLLBACK")
             raise
-        if snap.get("last_cycle_s") is None:
+        if snap.get("last_cycle_s") is None and program_key(snap.get("program")) == program_key(latest.get("program")):
             snap["last_cycle_s"] = latest.get("last_cycle_s")   # keep last known across agent restarts
+            # (a different program starts without one: the finish time uses that program's stored average)
         snap.pop("alarms", None)
         snap["received_at"] = now
         timer = snap.get("cycle_timer_s")
@@ -490,6 +533,8 @@ def ingest(snap: dict) -> dict:
                 and parts - prev_parts <= 5 and latest.get("parts_required") == req):
             meta["job_complete"] = {"at": now, "parts": parts, "required": req}
             log.info("Job complete: %s/%s", parts, req)
+        if connected:
+            record_cycle(snap, now, demo)
         # when the count first sat at exactly the required count (for "overrun")
         if req and parts is not None and parts == req:
             if meta.get("at_req") != [parts, req]:
@@ -522,6 +567,8 @@ def status() -> dict:
         day_start = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
         today = db.execute("SELECT COUNT(*) AS n FROM alarms WHERE started_at>=?", (day_start,)).fetchone()["n"]
         parts, req, cyc = latest.get("parts"), latest.get("parts_required"), latest.get("last_cycle_s")
+        prog_info = program_info()
+        cyc = cyc or prog_info.get("avg_cycle_s")   # just loaded: the program's average from last time
         eta = (req - parts) * cyc if (parts is not None and req and cyc and req > parts) else None
         running = state == "running"
         bar_change = running and bool(latest.get("bar_change")) and latest.get("state") == "running"
@@ -555,7 +602,7 @@ def status() -> dict:
                                                         and now - (meta.get("at_req_since") or now) > 8))),
             "agent_version": latest.get("agent_version"),
             "agent_update": update_info().get("version"),
-            "program": program_info(),
+            "program": prog_info,
             "paths": latest.get("paths") or [],
             "active_alarms": active if state != "off" else [],
             "messages": message_rows(True, 10) if state != "off" else [],
@@ -833,6 +880,7 @@ class Handler(BaseHTTPRequestHandler):
                     current = program_key(latest.get("program"))
                     keys = {r["program"] for r in db.execute("SELECT program FROM programs")}
                     keys |= {r["program"] for r in db.execute("SELECT DISTINCT program FROM bars WHERE COALESCE(demo,0)=0")}
+                    keys |= {r["program"] for r in db.execute("SELECT DISTINCT program FROM cycles WHERE COALESCE(demo,0)=0")}
                     if current:
                         keys.add(current)
                     rows = [program_row(k, current) for k in keys]

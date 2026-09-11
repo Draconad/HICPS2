@@ -292,8 +292,10 @@ async function status() {
                                                   : '<span style="color:#ff9f0a;font-weight:600">&infin; Won\'t stop at count</span>')]
     .filter(Boolean).join("<br>");
   $("cycle").textContent = dur(s.last_cycle_s);
-  $("cur").textContent = s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "";
   const p = s.program || {};
+  $("cur").innerHTML = [s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "",
+    p.avg_cycle_s ? `<span title="Average of its last ${p.avg_cycle_parts} parts">Program average ${dur(p.avg_cycle_s)}</span>` : ""]
+    .filter(Boolean).join("<br>");
   $("prog").textContent = p.label || p.name || (p.number ? "O" + p.number : "—");
   progNow = p;
   $("progname").hidden = !p.key;
