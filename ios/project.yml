@@ -8,7 +8,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "16"
+    CURRENT_PROJECT_VERSION: "17"
     TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad (an iPhone-only app on iPad gets no Live Activities)
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
@@ -40,9 +40,10 @@ targets:
         UIBackgroundModes: [audio, fetch, remote-notification]
         BGTaskSchedulerPermittedIdentifiers: [local.hanwhamonitor.app.refresh]
         NSLocalNetworkUsageDescription: Connects to the Hanwha Monitor server on your local network.
+        # Plain http:// to any address (LAN, Tailscale or public IP). Don't add NSAllowsLocalNetworking here:
+        # on iOS 10+ its presence makes iOS ignore NSAllowsArbitraryLoads, which blocks http to public IPs.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-          NSAllowsLocalNetworking: true
     entitlements:
       path: App/HanwhaMonitor.entitlements
       properties:
