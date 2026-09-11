@@ -7,12 +7,14 @@ import time
 
 import requests
 
+from .config import normalize_url
+
 log = logging.getLogger("hanwha.uploader")
 
 
 class Uploader:
     def __init__(self, server_url: str, api_key: str = "", on_ack=None):
-        self.url = server_url.rstrip("/")
+        self.url = normalize_url(server_url)
         self.api_key = api_key
         self.on_ack = on_ack
         self.connected = False
@@ -81,11 +83,14 @@ class Uploader:
     @staticmethod
     def test(server_url: str, api_key: str = "") -> tuple[bool, str]:
         try:
+            server_url = normalize_url(server_url)
+            if not server_url:
+                return False, "Enter the server address first, e.g. http://100.x.y.z:8420"
             h = {"X-API-Key": api_key} if api_key else {}
-            r = requests.get(server_url.rstrip("/") + "/api/health", headers=h, timeout=4)
+            r = requests.get(server_url + "/api/health", headers=h, timeout=4)
             if r.status_code == 401:
                 return False, "Reached the server, but the API key is wrong."
             r.raise_for_status()
-            return True, f"Connected - server version {r.json().get('version', '?')}"
+            return True, f"Connected to {server_url} - server version {r.json().get('version', '?')}"
         except Exception as e:
             return False, f"Could not reach server: {e}"

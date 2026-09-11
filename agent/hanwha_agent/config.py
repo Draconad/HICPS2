@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "HanwhaMonitor"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
+
+
+def normalize_url(url: str) -> str:
+    """Tidy a typed server address: fixes wrong/missing slashes, backslashes, stray spaces, missing http://."""
+    u = (url or "").strip().replace("\\", "/").replace(" ", "")
+    if not u:
+        return ""
+    m = re.match(r"^([a-zA-Z]+):?/*(.*)$", u)
+    if m and m.group(1).lower() in ("http", "https") and (":" in u.split("/")[0] or u.lower().startswith(("http/", "https/"))):
+        scheme, rest = m.group(1).lower(), m.group(2)
+    else:
+        scheme, rest = "http", u.lstrip("/")
+    return f"{scheme}://{rest}".rstrip("/")
 
 
 def data_dir() -> Path:
@@ -56,6 +70,7 @@ class Config:
                         setattr(cfg, k, v)
             except Exception:
                 pass
+        cfg.server_url = normalize_url(cfg.server_url)
         return cfg
 
     def save(self):

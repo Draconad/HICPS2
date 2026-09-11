@@ -13,7 +13,7 @@ from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .collector import Collector
-from .config import VERSION, Config, data_dir, set_autostart
+from .config import VERSION, Config, data_dir, normalize_url, set_autostart
 from .uploader import Uploader
 
 log = logging.getLogger("hanwha.gui")
@@ -311,6 +311,8 @@ class App:
                     setattr(self.cfg, key, max(0.5, float(str(v).strip())))
                 else:
                     setattr(self.cfg, key, str(v).strip())
+            self.cfg.server_url = normalize_url(self.cfg.server_url)
+            self.vars["server_url"].set(self.cfg.server_url)
         except ValueError as e:
             messagebox.showerror("Invalid setting", str(e))
             return
@@ -333,7 +335,7 @@ class App:
         threading.Thread(target=run, daemon=True).start()
 
     def open_dashboard(self):
-        webbrowser.open(self.cfg.server_url.rstrip("/") + "/")
+        webbrowser.open(normalize_url(self.cfg.server_url) + "/")
 
     def open_logs(self):
         webbrowser.open(str(data_dir() / "logs"))
