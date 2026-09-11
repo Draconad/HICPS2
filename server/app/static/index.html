@@ -91,6 +91,7 @@
       <video id="camvid" muted autoplay playsinline hidden></video>
       <div class="badge" id="cambadge"></div>
     </div>
+    <p class="sub" id="camnote">Live video runs a few seconds behind real time.</p>
   </div>
 
   <h2>Active alarms</h2>
@@ -229,12 +230,30 @@ function refreshStill() {
 }
 still.onload = () => { $("camwait").hidden = true; };
 let camInfo = null;
+// roughly how far behind real time the picture is: distance to the newest video + one chunk
+// (a chunk only reaches the server once it's complete)
+function camLag() {
+  if (!camPlaying) return null;
+  const seg = (camInfo && camInfo.segment_s) || 2;
+  let toEdge = null;
+  if (hls && Number.isFinite(hls.latency)) toEdge = hls.latency;
+  else if (vid.seekable && vid.seekable.length) toEdge = vid.seekable.end(vid.seekable.length - 1) - vid.currentTime;
+  const lag = toEdge == null ? null : toEdge + seg;
+  return lag != null && lag > 0 && lag < 120 ? lag : null;
+}
 function camBadge() {
   const b = $("cambadge");
   const i = camInfo || {};
   b.title = i.segment_s ? `Video chunks: ${i.segment_s}s each, arriving every ${i.arrival_gap_s ?? "?"}s ` +
                           `(slowest ${i.arrival_gap_max_s ?? "?"}s), ${i.kbps ?? "?"} kbit/s` : "";
-  if (camPlaying) { b.className = "badge live"; b.textContent = "LIVE"; return; }
+  if (camPlaying) {
+    const lag = camLag();
+    b.className = "badge live";
+    b.textContent = lag ? `LIVE · ~${Math.round(lag)} s behind` : "LIVE";
+    $("camnote").textContent = lag ? `Live video is about ${Math.round(lag)} seconds behind real time.`
+                                   : "Live video runs a few seconds behind real time.";
+    return;
+  }
   b.className = "badge";
   const c = camInfo && camInfo.still;
   b.textContent = noPlayer ? "Stills only - the video player didn't load" : camVisible && camInfo ? "Starting live video…" : (c && c.last_frame_at ? "Last image " + t(c.last_frame_at) : "");

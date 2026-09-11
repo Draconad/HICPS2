@@ -133,6 +133,7 @@ struct APIClient {
         var ready: Bool
         var session: String?
         var url: String?
+        var segmentS: Double?     // length of each video chunk
     }
 
     /// Live video info. Asking also tells the server someone is watching, so the PC starts streaming.

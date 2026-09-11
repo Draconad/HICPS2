@@ -46,7 +46,15 @@ struct CameraView: View {
             }
             .overlay(alignment: .topLeading) { badge.padding(12) }
             .overlay(alignment: .bottom) {
-                if let message, still != nil {
+                if player.isPlaying && message == nil {
+                    Text(player.lag.map { "Live video is about \(Int($0.rounded())) seconds behind real time" }
+                         ?? "Live video runs a few seconds behind real time")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(.bottom, 12)
+                } else if let message, still != nil {
                     Text(message)
                         .font(.footnote)
                         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -74,7 +82,8 @@ struct CameraView: View {
             HStack(spacing: 6) {
                 if player.isPlaying {
                     Circle().fill(Color.red).frame(width: 8, height: 8)
-                    Text("LIVE").font(.caption.weight(.heavy))
+                    Text(player.lag.map { "LIVE · ~\(Int($0.rounded())) s behind" } ?? "LIVE")
+                        .font(.caption.weight(.heavy))
                 } else if player.hasItem || !noCamera {
                     ProgressView().controlSize(.mini).tint(.white)
                     Text("Starting live video…").font(.caption.weight(.semibold))
@@ -142,6 +151,7 @@ struct CameraView: View {
                 let live = try await api.cameraLive()
                 if live.ready, let path = live.url, let url = api.absoluteURL(path) {
                     player.play(url: url, session: live.session ?? path)
+                    player.updateLag(segment: live.segmentS ?? 2)
                 } else if !live.ready {
                     player.stop()
                 }
@@ -179,6 +189,8 @@ final class LivePlayer: ObservableObject {
     let player = AVPlayer()
     @Published private(set) var isPlaying = false
     @Published private(set) var hasItem = false
+    /// Roughly how far behind real time the picture is (seconds), while playing.
+    @Published private(set) var lag: Double?
     private var session: String?
     private var observation: NSKeyValueObservation?
 
@@ -206,6 +218,16 @@ final class LivePlayer: ObservableObject {
         player.play()
     }
 
+    /// Distance from the newest video the player has, plus one chunk (a chunk reaches the server once complete).
+    func updateLag(segment: Double) {
+        guard isPlaying, let item = player.currentItem,
+              let range = item.seekableTimeRanges.last?.timeRangeValue else { lag = nil; return }
+        let edge = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+        let now = CMTimeGetSeconds(item.currentTime())
+        let value = edge - now + segment
+        lag = (value.isFinite && value > 0 && value < 120) ? value : nil
+    }
+
     func stop() {
         guard session != nil || player.currentItem != nil else { return }
         session = nil
@@ -213,6 +235,7 @@ final class LivePlayer: ObservableObject {
         player.replaceCurrentItem(with: nil)
         hasItem = false
         isPlaying = false
+        lag = nil
     }
 }
 
