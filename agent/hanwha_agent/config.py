@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "HanwhaMonitor"
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 
 def normalize_url(url: str) -> str:
@@ -41,7 +41,8 @@ class Config:
     # FOCAS paths: XE35 = path 1 (Main), path 2 (Sub)
     path_names: dict = field(default_factory=lambda: {"1": "Main", "2": "Sub"})
     count_path: int = 1               # path whose part counter / cycle timer / program is shown
-    bar_change_mcode: int = 92        # M code that runs the bar change (0 = don't detect bar changes)
+    bar_change_program: int = 9002    # subprogram that does the bar change (O9002 on the XE35; 0 = off)
+    bar_change_mcode: int = 0         # optional: also while this M code is the active block (0 = off)
     work_counter_signal: str = ""
     # camera (Tapo C210 etc. over RTSP, relayed to the server)
     camera_enabled: bool = False
@@ -79,6 +80,8 @@ class Config:
                 for k, v in raw.items():
                     if k in known:
                         setattr(cfg, k, v)
+                if "bar_change_program" not in raw:   # before 1.4.0 the default was an M92 guess
+                    cfg.bar_change_mcode = 0
             except Exception:
                 pass
         cfg.server_url = normalize_url(cfg.server_url)

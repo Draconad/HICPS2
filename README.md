@@ -127,8 +127,8 @@ Closing the window hides it to the tray. It keeps monitoring, and the tray icon 
 Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files. The old script once wrote a 33 MB log.
 
 ### Bar change
-While the bar-change M code (**M92** by default; set under **Bar change M code**, 0 turns it off) is the block being executed, the status shows **Bar change** (blue) on the PC app, dashboard, iPhone app and Live Activity, with a timer. The part made across a bar change doesn't count towards the cycle time.
-The log shows how each bar change was spotted, e.g. `Bar change started (Main: M92 active)`. If a bar change happens and nothing is logged, use the Signal finder while one is in progress.
+While the bar-change subprogram **O9002** is running, the status shows **Bar change** (blue) everywhere: the PC app, dashboard, iPhone app and Live Activity, with a timer. The part made across a bar change doesn't count towards the cycle time. The program number is under Settings > **Bar change program**, where 0 turns it off. There's also an optional **Bar change M code** setting, off by default.
+The Program box always shows your main part program, not the subprogram it has called.
 
 ### Camera (Tapo C210 or any RTSP camera)
 The PC app reads the camera on the machine's network and sends it to the server. It shows on the dashboard, below the part count, and on the iPhone app's **Camera** tab. Only the PC app talks to the camera; nothing new is opened up on the network.
@@ -280,7 +280,7 @@ Tick **Demo mode** in the PC app's Settings. It simulates cycles, part counts, s
 | Total parts | parameter 6712 | |
 | Cycle time | Time between part-count increments while running (fallback: CNC cycle timer `cnc_rdtimer` type 3) | "Current cycle" is the live CNC cycle timer. |
 | Program | `cnc_exeprgname` (fallback `cnc_rdprgnum`) + comment from `cnc_rdprogdir3` | |
-| Bar change | `cnc_rdcommand` (M codes in the active block) + `cnc_rdexecprog` (text of the executing block) | Either one showing M92 counts. |
+| Bar change | `cnc_rdprgnum` (the program executing right now, vs. the main program) | O9002 running = bar change. Optional M code check via `cnc_rdcommand` / `cnc_rdexecprog`. |
 | Work counter on/off | `pmc_rdpmcrng` (one PMC bit) or `cnc_rdmacro` | The address comes from the Signal finder. |
 
 If the part count or program looks wrong on the real machine, try **Counter path = 2** first. Then send me the PC app's log.

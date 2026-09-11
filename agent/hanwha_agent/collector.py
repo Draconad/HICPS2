@@ -217,7 +217,7 @@ class Collector:
         self._work_counter = wc
 
         bar, how = False, ""
-        if cfg.bar_change_mcode and any(p["run_code"] in (3, 4) for p in paths):
+        if (cfg.bar_change_program or cfg.bar_change_mcode) and any(p["run_code"] in (3, 4) for p in paths):
             bar, how = self._detect_bar_change(paths)
 
         return {"paths": paths, "alarms": alarms, "parts": parts, "required": required, "total": total,
@@ -225,16 +225,28 @@ class Collector:
                 "bar_change": bar, "bar_how": how, "work_counter": wc}
 
     def _detect_bar_change(self, paths: list[dict]) -> tuple[bool, str]:
-        """True while the bar-change M code (M92) is the block being executed on a running path.
-        Two independent checks, so it works whether the M code is handled by the machine's PMC
-        (the M92 block stays active until the bar is loaded) or shows up in the program text."""
-        code = int(self.cfg.bar_change_mcode)
+        """True while the bar-change subprogram (O9002) is executing on a running path - optionally also while a
+        bar-change M code is the active block (checked two ways: the active M codes and the block's text)."""
+        prog = int(self.cfg.bar_change_program or 0)
+        code = int(self.cfg.bar_change_mcode or 0)
         pattern = re.compile(rf"(?<![A-Z#])M0*{code}(?!\d)", re.I)
         hows = []
         for p in paths:
             if p["run_code"] not in (3, 4):
                 continue
             num, name = p["path"], p["name"]
+            if prog and "program" not in self._bar_methods_failed:
+                try:
+                    running, _main = self.machine.program_numbers(num)
+                    if running == prog:
+                        hows.append(f"{name}: O{prog:04d} running")
+                except FocasError as e:
+                    if e.is_connection_error:
+                        raise
+                    self._bar_methods_failed.add("program")
+                    log.info("Bar change: can't read the running program number (%s)", e)
+            if not code:
+                continue
             if "mcode" not in self._bar_methods_failed:
                 try:
                     ms = self.machine.active_mcodes(num)
@@ -372,7 +384,7 @@ class Collector:
                 detail = "Emergency stop" if emergency else "Alarm"
         elif running:
             state = "running"
-            detail = (f"Bar change (M{self.cfg.bar_change_mcode})" if bar else
+            detail = ("Bar change" if bar else
                       " / ".join(f"{p['name']} {p['mode']} {p['run']}" for p in paths))
         else:
             state = "standby"

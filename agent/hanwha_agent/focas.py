@@ -402,17 +402,31 @@ class FocasMachine:
         self._check("cnc_rdtimer", _lib.cnc_rdtimer(self.handle, 3, ctypes.byref(t)))  # 3 = cycle time
         return t.minute * 60 + t.msec / 1000.0
 
-    def program(self, path: int) -> tuple[int | None, str]:
-        """Returns (O-number, name) of the executing program."""
+    def program_numbers(self, path: int) -> tuple[int | None, int | None]:
+        """(program executing right now - may be a subprogram like O9002, main program) via cnc_rdprgnum."""
         self.set_path(path)
-        e = ODBEXEPRG()
-        ret = _lib.cnc_exeprgname(self.handle, ctypes.byref(e))
-        if ret == 0:
-            name = _decode(e.name)
-            return (e.o_num or None), (name or (f"O{e.o_num:04d}" if e.o_num else ""))
         p = ODBPRO()
         self._check("cnc_rdprgnum", _lib.cnc_rdprgnum(self.handle, ctypes.byref(p)))
-        return (p.data or None), (f"O{p.data:04d}" if p.data else "")
+        return (p.data if p.data > 0 else None), (p.mdata if p.mdata > 0 else None)
+
+    def program(self, path: int) -> tuple[int | None, str]:
+        """Returns (O-number, name) of the MAIN program - not a subprogram it has called (e.g. the bar change)."""
+        self.set_path(path)
+        running = main = None
+        try:
+            running, main = self.program_numbers(path)
+        except FocasError as err:
+            if err.is_connection_error:
+                raise
+        e = ODBEXEPRG()
+        ret = _lib.cnc_exeprgname(self.handle, ctypes.byref(e))
+        exe_num, exe_name = (e.o_num or None, _decode(e.name)) if ret == 0 else (None, "")
+        if main:
+            same = exe_num == main or (running is not None and running == main)
+            return main, (exe_name if same and exe_name else f"O{main:04d}")
+        if exe_num or exe_name:
+            return exe_num, exe_name or f"O{exe_num:04d}"
+        return running, (f"O{running:04d}" if running else "")
 
     def active_mcodes(self, path: int) -> list[tuple[int, int]]:
         """M codes commanded in the block being executed, as (value, flag) pairs (cnc_rdcommand)."""
@@ -540,6 +554,9 @@ class MockMachine:
 
     def active_mcodes(self, path: int) -> list[tuple[int, int]]:
         return [(92, 0x8000)] if (self.phase == "barchange" and path == 1) else []
+
+    def program_numbers(self, path: int):
+        return (9002, 1234) if (self.phase == "barchange" and path == 1) else (1234, 1234)
 
     def pmc_bytes(self, area: str, start: int, count: int) -> bytes:
         if area == "K" and start + count > 99:
