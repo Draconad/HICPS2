@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#000000">
 <title>Hanwha Monitor</title>
+<link rel="icon" href="logo.png">
 <style>
   :root {
     color-scheme: dark;
@@ -44,6 +45,12 @@
   .tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 1px 6px; margin-left: 6px;
          border-radius: 4px; background: var(--line); color: var(--muted); vertical-align: middle; }
   tr.demo td { opacity: .7; }
+  .banner { background: #2a1d0a; border: 1px solid #5c3d10; color: #ffb454; border-radius: 12px; padding: 10px 14px;
+            font-size: 13px; margin-bottom: 14px; }
+  .banner code { background: #3a2810; padding: 1px 5px; border-radius: 4px; }
+  .footrow { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .footrow a { color: var(--muted); }
+  .footrow a:hover { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -55,6 +62,11 @@
     </div>
     <div class="pill" id="pill">—</div>
   </header>
+  <div class="banner" id="openapi" hidden>
+    <b>The data API has no key.</b> This page needs a login, but anyone who can reach the server can still read
+    the machine data through <code>/api</code>. Set <code>API_KEY</code> on the Docker container (and the same key in
+    the PC app and iPhone app) to lock it down.
+  </div>
 
   <div class="grid">
     <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
@@ -73,7 +85,10 @@
     <thead><tr><th>Time</th><th>Code</th><th>Message</th><th>Path</th><th>Duration</th></tr></thead>
     <tbody id="history"></tbody>
   </table></div>
-  <p class="sub" id="foot"></p>
+  <div class="footrow">
+    <p class="sub" id="foot"></p>
+    <p class="sub"><span id="who"></span> &middot; <a href="login?change=1">Change login</a> &middot; <a href="#" id="logout">Log out</a></p>
+  </div>
 </main>
 <script>
 const key = new URLSearchParams(location.search).get("key");
@@ -87,8 +102,13 @@ const t = ts => new Date(ts * 1000).toLocaleString([], { day: "2-digit", month: 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const $ = id => document.getElementById(id);
 
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (r.status === 401) { location.replace("login"); throw new Error("Logged out"); }
+  return r.json();
+}
 async function status() {
-  const s = await (await fetch("api/status" + q)).json();
+  const s = await getJSON("api/status" + q);
   $("name").textContent = s.machine_name + (s.demo ? " (demo)" : "");
   const bar = s.state === "running" && s.bar_change;
   $("detail").textContent = bar ? `Changing bar${s.bar_change_since ? " · " + dur(Date.now() / 1000 - s.bar_change_since) : ""}` : (s.state_detail || "");
@@ -114,7 +134,7 @@ async function status() {
   $("foot").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
 }
 async function history() {
-  const r = await (await fetch("api/alarms" + (q ? q + "&" : "?") + "limit=200")).json();
+  const r = await getJSON("api/alarms" + (q ? q + "&" : "?") + "limit=200");
   const btn = $("cleardemo");
   btn.hidden = !r.demo_count;
   btn.textContent = `Clear demo alarms (${r.demo_count || 0})`;
@@ -133,6 +153,15 @@ $("cleardemo").onclick = async () => {
   } catch (e) { alert("Couldn't clear demo alarms: " + e.message); }
   btn.disabled = false;
 };
+$("logout").onclick = async e => {
+  e.preventDefault();
+  await fetch("auth/logout", { method: "POST" }).catch(() => {});
+  location.replace("login");
+};
+fetch("auth/info").then(r => r.json()).then(i => {
+  $("openapi").hidden = !!i.api_key_required;
+  $("who").textContent = i.username ? `Logged in as ${i.username}` : "";
+}).catch(() => {});
 const tick = () => status().catch(e => $("detail").textContent = "Can't reach server: " + e);
 tick(); history(); setInterval(tick, 2000); setInterval(history, 15000);
 </script>

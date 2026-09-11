@@ -73,13 +73,21 @@ The image at `ghcr.io/draconad/hanwha-monitor-server` is private, like the repo.
 
 To update after a new build, use **Force update** on the container. Unraid's "update available" check often can't see private images, but the pull itself works.
 
-**Check it:** open `http://<unraid-ip>:8420/`. You should see the dashboard showing "Waiting for the monitor PC".
+**Check it:** open `http://<unraid-ip>:8420/`. You'll get a login page:
+- The first login is **admin / admin**. You then have to choose your own username and password (at least 8 characters).
+- If `API_KEY` is set on the container, the login page also asks for it. You don't need `?key=` in the address any more.
+- You then see the dashboard showing "Waiting for the monitor PC". **Change login** and **Log out** are at the bottom of the page.
+- A browser stays logged in for 30 days. Changing the login signs out every other browser.
+- **Forgotten the login?** Set `RESET_LOGIN=true` on the container and restart. The login goes back to admin / admin. Then remove `RESET_LOGIN`, otherwise the login resets on every restart.
+
+The login only protects the dashboard page. The agent and the iPhone app use the API key. Without `API_KEY`, anyone who can reach the server can still read `/api/…`, and the dashboard shows a warning about this. If the server is reachable from the internet, set `API_KEY`.
 
 Environment options:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `API_KEY` | *(blank)* | Optional shared key. If set, enter the same key in the PC app and the iPhone app. |
+| `API_KEY` | *(blank)* | Shared key for the data API. If set, enter the same key in the PC app, the iPhone app and the dashboard login page. Strongly recommended if the server is reachable from the internet. |
+| `RESET_LOGIN` | *(blank)* | `true` resets the dashboard login to admin / admin on start. Remove it again afterwards. |
 | `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
 | `STANDBY_DELAY` | `4` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles). |
 | `TZ` | | Your timezone, used for the "alarms today" count. |
@@ -264,4 +272,4 @@ If the part count or program looks wrong on the real machine, try **Counter path
 
 ## API (for reference)
 
-`GET /api/status` · `GET /api/alarms?limit=100&before=<epoch>&active=1` · `GET /api/states?hours=24` · `POST /api/ingest` (agent) · `DELETE /api/alarms` (clears history) · `GET /api/health`. When `API_KEY` is set, send the key as the `X-API-Key` header or as `?key=`.
+`GET /api/status` · `GET /api/alarms?limit=100&before=<epoch>&active=1` · `GET /api/states?hours=24` · `POST /api/ingest` (agent) · `DELETE /api/alarms` (clears history) · `GET /api/health`. When `API_KEY` is set, send the key as the `X-API-Key` header or as `?key=`. A logged-in dashboard session also works.

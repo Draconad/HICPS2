@@ -11,7 +11,8 @@ services:
       - TZ=Europe/London
       - AGENT_TIMEOUT=30        # seconds without data from the PC before the machine shows OFF
       - STANDBY_DELAY=4         # seconds of standby before running -> standby shows (hides the gap between parts)
-      # - API_KEY=change-me     # optional shared key (set the same key in the PC app and iPhone app)
+      # - API_KEY=change-me     # shared key (same key in the PC app, iPhone app and dashboard login) - set it if exposed to the internet
+      # - RESET_LOGIN=true      # resets the dashboard login to admin / admin on start - remove again afterwards
       # Apple push (paid developer account) - put AuthKey_XXXXXXXXXX.p8 in the data folder
       # - APNS_KEY_ID=XXXXXXXXXX
       # - APNS_TEAM_ID=YYYYYYYYYY

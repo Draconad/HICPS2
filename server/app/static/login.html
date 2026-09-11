@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Hanwha Monitor - Log in</title>
+<link rel="icon" href="logo.png">
+<style>
+  :root { color-scheme: dark; --bg: #000; --card: #141414; --field: #1f1f1f; --ink: #f2f2f2; --muted: #8e8e93;
+          --line: #2c2c2c; --accent: #f47521; --bad: #ff453a; --good: #30c24a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+         font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  .card { width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+          padding: 28px 24px 24px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .brand img { width: 44px; height: 44px; border-radius: 10px; }
+  .brand h1 { font-size: 19px; margin: 0; }
+  .brand .sub { color: var(--muted); font-size: 13px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+          letter-spacing: .05em; margin: 14px 0 6px; }
+  input { width: 100%; font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+          border-radius: 10px; padding: 11px 12px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  button { width: 100%; margin-top: 20px; font: inherit; font-weight: 700; color: #000; background: var(--accent);
+           border: 0; border-radius: 10px; padding: 12px; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .6; cursor: default; }
+  .msg { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--bad); }
+  .note { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+  .note.warn { color: #ff9f0a; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .links { margin-top: 16px; text-align: center; font-size: 13px; }
+  .links a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">
+    <img src="logo.png" alt="">
+    <div><h1>Hanwha Monitor</h1><div class="sub" id="sub">Log in to the dashboard</div></div>
+  </div>
+
+  <form id="login" hidden autocomplete="on">
+    <label for="u">Username</label>
+    <input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="p">Password</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <div id="keyrow" hidden>
+      <label for="k">API key</label>
+      <input id="k" name="api_key" type="password" autocomplete="off" spellcheck="false">
+      <div class="hint">The API_KEY set on the Docker container.</div>
+    </div>
+    <button id="lbtn">Log in</button>
+    <div class="msg" id="lmsg"></div>
+  </form>
+
+  <form id="change" hidden>
+    <p class="note warn" id="firstnote" hidden>You're using the default login (admin / admin). Choose your own before continuing.</p>
+    <p class="note" id="changenote" hidden>Change the dashboard login. Other browsers will be signed out.</p>
+    <div id="currow">
+      <label for="cp">Current password</label>
+      <input id="cp" type="password" autocomplete="current-password">
+    </div>
+    <label for="nu">New username</label>
+    <input id="nu" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="np">New password</label>
+    <input id="np" type="password" autocomplete="new-password" minlength="8" required>
+    <label for="np2">Repeat new password</label>
+    <input id="np2" type="password" autocomplete="new-password" minlength="8" required>
+    <button id="cbtn">Save and continue</button>
+    <div class="msg" id="cmsg"></div>
+    <div class="links" id="cancel" hidden><a href="./">Back to the dashboard</a></div>
+  </form>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const wantChange = new URLSearchParams(location.search).has("change");
+let typedPassword = "";
+
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  return { ok: r.ok && j.ok !== false, ...j };
+}
+
+function showChange(info, first) {
+  $("login").hidden = true;
+  $("change").hidden = false;
+  $("sub").textContent = first ? "Set up your login" : "Change login";
+  $("firstnote").hidden = !first;
+  $("changenote").hidden = first;
+  $("cancel").hidden = first;
+  $("currow").hidden = first && !!typedPassword;   // just typed it on the login form
+  $("nu").value = first ? "" : (info.username || "");
+  (first ? $("nu") : $("cp")).focus();
+}
+
+async function init() {
+  let info = {};
+  try { info = await (await fetch("auth/info")).json(); } catch (e) {}
+  $("keyrow").hidden = !info.api_key_required;
+  if (info.logged_in && info.must_change) return showChange(info, true);
+  if (info.logged_in && wantChange) return showChange(info, false);
+  if (info.logged_in) return location.replace("./");
+  $("login").hidden = false;
+  $("u").focus();
+}
+
+$("login").onsubmit = async e => {
+  e.preventDefault();
+  $("lbtn").disabled = true; $("lmsg").textContent = "";
+  const r = await post("auth/login", { username: $("u").value, password: $("p").value, api_key: $("k").value });
+  $("lbtn").disabled = false;
+  if (!r.ok) { $("lmsg").textContent = r.error || "Couldn't log in."; return; }
+  typedPassword = $("p").value;
+  if (r.must_change) showChange({}, true); else location.replace("./");
+};
+
+$("change").onsubmit = async e => {
+  e.preventDefault();
+  $("cmsg").textContent = "";
+  if ($("np").value !== $("np2").value) { $("cmsg").textContent = "The new passwords don't match."; return; }
+  $("cbtn").disabled = true;
+  const r = await post("auth/change", { current_password: $("currow").hidden ? typedPassword : $("cp").value,
+                                        username: $("nu").value, password: $("np").value });
+  $("cbtn").disabled = false;
+  if (!r.ok) { $("cmsg").textContent = r.error || "Couldn't save."; return; }
+  location.replace("./");
+};
+
+init();
+</script>
+</body>
+</html>

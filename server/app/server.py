@@ -12,10 +12,15 @@ status to the iPhone app plus a small web dashboard.
   POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
   POST /api/push/unregister {token? , activity_id?}
   GET  /api/push/status     POST /api/push/test
-  GET  /               web dashboard
+  GET  /               web dashboard (needs a web login)      GET /login  login page
+  GET  /auth/info   POST /auth/login {username,password,api_key?}   POST /auth/change   POST /auth/logout
+
+/api/* accepts either the API key (X-API-Key header, or ?key=) or a logged-in browser session.
+Without API_KEY set, /api/* is open (the agent and app need no key) - only the dashboard page needs a login.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -26,16 +31,19 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlparse
 
 try:  # works both as "python app/server.py" and as a package import
     from apns import APNs
+    from auth import COOKIE, SESSION_DAYS, Auth
     from push import PushService
 except ImportError:  # pragma: no cover
     from .apns import APNs
+    from .auth import COOKIE, SESSION_DAYS, Auth
     from .push import PushService
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -347,6 +355,7 @@ def _kv_set_locked(k, v):
 
 
 push = PushService(db, _lock, APNs(), lambda: status(), _kv_get_locked, _kv_set_locked)
+auth = Auth(db, _lock, reset=os.environ.get("RESET_LOGIN", "").strip().lower() in ("1", "true", "yes"))
 
 
 def clear_demo() -> dict:
@@ -374,24 +383,94 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):   # quiet: the agent posts every couple of seconds
         pass
 
-    def _send(self, code: int, body: bytes, ctype: str):
+    def _send(self, code: int, body: bytes, ctype: str, headers: dict | None = None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Frame-Options", "DENY")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _json(self, obj, code: int = 200):
-        self._send(code, json.dumps(obj).encode(), "application/json")
+    def _json(self, obj, code: int = 200, headers: dict | None = None):
+        self._send(code, json.dumps(obj).encode(), "application/json", headers)
+
+    def _redirect(self, where: str):
+        self._send(302, b"", "text/plain", {"Location": where})
+
+    def _token(self) -> str | None:
+        try:
+            c = SimpleCookie(self.headers.get("Cookie") or "")
+            return c[COOKIE].value if COOKIE in c else None
+        except Exception:
+            return None
+
+    def _session(self) -> dict | None:
+        return auth.session(self._token())
+
+    def _client_ip(self) -> str:
+        return self.client_address[0] if self.client_address else "?"
+
+    def _body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        if not 0 < length < 100_000:
+            return {}
+        body = json.loads(self.rfile.read(length))
+        return body if isinstance(body, dict) else {}
+
+    @staticmethod
+    def _key_ok(given: str) -> bool:
+        return bool(API_KEY) and hmac.compare_digest((given or "").encode(), API_KEY.encode())
 
     def _authorised(self, qs) -> bool:
+        s = self._session()
+        if s and not s["must_change"]:
+            return True
         if not API_KEY:
             return True
-        given = self.headers.get("X-API-Key") or (qs.get("key") or [""])[0]
-        return given == API_KEY
+        return self._key_ok(self.headers.get("X-API-Key") or (qs.get("key") or [""])[0])
+
+    def _auth_route(self, method: str, path: str) -> bool:
+        """Login page + /auth/* endpoints. Returns True if handled."""
+        if method == "GET" and path == "/login":
+            self._send(200, (STATIC / "login.html").read_bytes(), "text/html; charset=utf-8")
+            return True
+        if method == "GET" and path == "/logo.png":
+            self._send(200, (STATIC / "logo.png").read_bytes(), "image/png", {"Cache-Control": "max-age=86400"})
+            return True
+        if not path.startswith("/auth/"):
+            return False
+        s = self._session()
+        if method == "GET" and path == "/auth/info":
+            self._json({"api_key_required": bool(API_KEY), "logged_in": bool(s),
+                        "must_change": bool(s and s["must_change"]), "username": s["username"] if s else None})
+        elif method == "POST" and path == "/auth/login":
+            b = self._body()
+            key_ok = self._key_ok(str(b.get("api_key") or "")) if API_KEY else True
+            token, err = auth.login(str(b.get("username") or ""), str(b.get("password") or ""), self._client_ip(), key_ok)
+            if not token:
+                self._json({"ok": False, "error": err}, 401)
+            else:
+                cookie = f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"
+                self._json({"ok": True, "must_change": auth.session(token)["must_change"]}, 200, {"Set-Cookie": cookie})
+        elif method == "POST" and path == "/auth/change":
+            if not s:
+                self._json({"ok": False, "error": "Please log in again."}, 401)
+            else:
+                b = self._body()
+                err = auth.change(self._token(), str(b.get("current_password") or ""), str(b.get("username") or ""),
+                                  str(b.get("password") or ""))
+                self._json({"ok": not err, "error": err}, 200 if not err else 400)
+        elif method == "POST" and path == "/auth/logout":
+            auth.logout(self._token())
+            self._json({"ok": True}, 200, {"Set-Cookie": f"{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"})
+        else:
+            self._json({"detail": "not found"}, 404)
+        return True
 
     def _route(self, method: str):
         url = urlparse(self.path)
@@ -399,7 +478,12 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path.rstrip("/") or "/"
         try:
             if method == "GET" and path in ("/", "/index.html"):
+                s = self._session()
+                if not s or s["must_change"]:
+                    return self._redirect("login")
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+            if self._auth_route(method, path):
+                return
             if not path.startswith("/api/"):
                 return self._json({"detail": "not found"}, 404)
             if not self._authorised(qs):
