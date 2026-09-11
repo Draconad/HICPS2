@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover
     from .apns import APNs
     from .push import PushService
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -241,6 +241,14 @@ def ingest(snap: dict) -> dict:
         snap["cycle_started_at"] = (now - timer) if (timer and snap.get("state") == "running") else None
         if snap.get("state") != latest.get("state"):
             meta["raw_since"] = now
+        snap["bar_change"] = bool(snap.get("bar_change")) and connected and snap.get("state") == "running"
+        if snap["bar_change"] != bool(latest.get("bar_change")):
+            if snap["bar_change"]:
+                meta["bar_change_since"] = now
+                log.info("Bar change started (%s)", snap.get("bar_change_how") or "")
+            else:
+                since = meta.get("bar_change_since")
+                log.info("Bar change finished%s", f" after {now - since:.0f} s" if since else "")
         if snap.get("state") == "running":
             meta["last_running"] = {"detail": snap.get("state_detail"), "cycle_started_at": snap.get("cycle_started_at"),
                                     "cycle_timer_s": snap.get("cycle_timer_s")}
@@ -269,6 +277,7 @@ def status() -> dict:
         parts, req, cyc = latest.get("parts"), latest.get("parts_required"), latest.get("last_cycle_s")
         eta = (req - parts) * cyc if (parts is not None and req and cyc and req > parts) else None
         running = state == "running"
+        bar_change = running and bool(latest.get("bar_change")) and latest.get("state") == "running"
         # during the short between-cycles pause the agent reports standby: keep the last cycle clock
         cyc_src = latest if latest.get("state") == "running" else (meta.get("last_running") or {})
         return {
@@ -292,6 +301,11 @@ def status() -> dict:
             "paths": latest.get("paths") or [],
             "active_alarms": active if state != "off" else [],
             "alarms_today": today,
+            # A bar change is reported as state "running" plus this flag (keeps older app builds working).
+            "bar_change": bar_change,
+            "bar_change_since": meta.get("bar_change_since") if bar_change else None,
+            # work counter "stop at required count" switch: True/False, None = not set up on the monitor PC
+            "work_counter": latest.get("work_counter") if state != "off" else None,
         }
 
 

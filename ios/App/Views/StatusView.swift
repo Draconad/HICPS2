@@ -127,6 +127,12 @@ struct PartsCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let on = s.workCounter {
+                Label(on ? "Stops at count" : "Won't stop at count",
+                      systemImage: on ? "stop.circle.fill" : "infinity.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(on ? Color.green : Color.orange)
+            }
         }
     }
 }

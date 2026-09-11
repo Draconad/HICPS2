@@ -103,6 +103,12 @@ class PushService:
                          ("cycleStartEpoch", "cycle_started_at")):
             if s.get(src) is not None:
                 c[key] = s[src]
+        if s.get("work_counter") is not None:
+            c["counterStop"] = bool(s["work_counter"])
+        if s.get("bar_change"):   # state stays "running" so older app builds still decode it
+            c["barChange"] = True
+            if s.get("bar_change_since"):
+                c["barChangeStartEpoch"] = s["bar_change_since"]
         return c
 
     @staticmethod
@@ -207,7 +213,9 @@ class PushService:
             due = now - (row["last_push"] or 0) > HEARTBEAT
             if not (changed or due):
                 continue
-            important = state_changed or bool(new_alarms) or (last_key and json.loads(last_key).get("state") != content["state"])
+            prev_c = json.loads(last_key) if last_key else {}
+            important = state_changed or bool(new_alarms) or (last_key and (
+                prev_c.get("state") != content["state"] or bool(prev_c.get("barChange")) != bool(content.get("barChange"))))
             if not important and now - (row["last_push"] or 0) < MIN_GAP_LOW_PRIORITY:
                 continue
             aps = {"timestamp": int(now), "event": "update", "content-state": content,

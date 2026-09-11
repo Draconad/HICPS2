@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "HanwhaMonitor"
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 
 def normalize_url(url: str) -> str:
@@ -41,6 +41,8 @@ class Config:
     # FOCAS paths: XE35 = path 1 (Main), path 2 (Sub)
     path_names: dict = field(default_factory=lambda: {"1": "Main", "2": "Sub"})
     count_path: int = 1               # path whose part counter / cycle timer / program is shown
+    bar_change_mcode: int = 92        # M code that runs the bar change (0 = don't detect bar changes)
+    work_counter_signal: str = ""     # PMC bit / macro var that is on when "stop at required count" is enabled, e.g. K5.3
     server_url: str = "http://tower.local:8420"
     api_key: str = ""
     dll_path: str = ""                # blank = look next to the exe

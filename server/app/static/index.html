@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg: #f4f5f7; --card: #fff; --ink: #1d2127; --muted: #6b7280; --line: #e6e8ec;
-    --run: #2fb344; --stby: #e0a800; --alarm: #e5383b; --off: #8a8f98; --accent: #2f6fed;
+    --run: #2fb344; --bar: #2f8cff; --stby: #e0a800; --alarm: #e5383b; --off: #8a8f98; --accent: #2f6fed;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #0f1114; --card: #1a1d22; --ink: #eef0f3; --muted: #9aa1ab; --line: #2a2e35; }
@@ -86,12 +86,16 @@ const $ = id => document.getElementById(id);
 async function status() {
   const s = await (await fetch("api/status" + q)).json();
   $("name").textContent = s.machine_name + (s.demo ? " (demo)" : "");
-  $("detail").textContent = s.state_detail || "";
-  $("pill").textContent = s.state.toUpperCase();
-  $("pill").style.background = colors[s.state] || "var(--off)";
+  const bar = s.state === "running" && s.bar_change;
+  $("detail").textContent = bar ? `Changing bar${s.bar_change_since ? " · " + dur(Date.now() / 1000 - s.bar_change_since) : ""}` : (s.state_detail || "");
+  $("pill").textContent = bar ? "BAR CHANGE" : s.state.toUpperCase();
+  $("pill").style.background = bar ? "var(--bar)" : (colors[s.state] || "var(--off)");
   $("parts").textContent = s.parts == null ? "—" : (s.parts_required ? `${s.parts} / ${s.parts_required}` : s.parts);
   $("bar").style.width = (s.parts_required ? Math.min(100, 100 * s.parts / s.parts_required) : 0) + "%";
-  $("eta").textContent = s.eta_s ? `Done in ~${dur(s.eta_s)}` : "";
+  $("eta").innerHTML = [s.eta_s ? `Done in ~${dur(s.eta_s)}` : "",
+    s.work_counter == null ? "" : (s.work_counter ? '<span style="color:var(--run);font-weight:600">&#9632; Stops at count</span>'
+                                                  : '<span style="color:#d97706;font-weight:600">&infin; Won\'t stop at count</span>')]
+    .filter(Boolean).join(" &middot; ");
   $("cycle").textContent = dur(s.last_cycle_s);
   $("cur").textContent = s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "";
   const p = s.program || {};

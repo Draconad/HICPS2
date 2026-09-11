@@ -97,7 +97,7 @@ final class MachineStore: ObservableObject {
             }
         }
         guard let prev = previousState, prev != s.state else { return }
-        if AppSettings.notifyStopped, prev == .running, s.state == .standby {
+        if AppSettings.notifyStopped, prev.isRunning, s.state == .standby {
             NotificationManager.shared.post(id: "stopped-\(Int(s.serverTime))", title: "\(s.machineName) stopped",
                                             body: s.stateDetail ?? "Machine is in standby")
         }

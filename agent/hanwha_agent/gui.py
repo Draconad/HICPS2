@@ -13,13 +13,15 @@ from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .collector import Collector
+from . import signals
+from .focas import FocasMachine, MockMachine, parse_signal
 from .config import VERSION, Config, data_dir, normalize_url, set_autostart
 from .uploader import Uploader
 
 log = logging.getLogger("hanwha.gui")
 
-STATE_COLORS = {"running": "#2fb344", "standby": "#f2b90c", "alarm": "#e5383b", "off": "#8a8f98"}
-STATE_LABELS = {"running": "RUNNING", "standby": "STANDBY", "alarm": "ALARM", "off": "OFF"}
+STATE_COLORS = {"running": "#2fb344", "barchange": "#2f8cff", "standby": "#f2b90c", "alarm": "#e5383b", "off": "#8a8f98"}
+STATE_LABELS = {"running": "RUNNING", "barchange": "BAR CHANGE", "standby": "STANDBY", "alarm": "ALARM", "off": "OFF"}
 BG = "#f4f5f7"
 CARD = "#ffffff"
 INK = "#1d2127"
@@ -167,6 +169,7 @@ class App:
         nb.add(self._build_overview(nb), text="Overview")
         nb.add(self._build_settings(nb), text="Settings")
         nb.add(self._build_log(nb), text="Log")
+        nb.add(self._build_signals(nb), text="Signal finder")
 
         foot = tk.Frame(self.root, bg=BG)
         foot.pack(fill="x", padx=16, pady=(0, 8))
@@ -240,6 +243,8 @@ class App:
             ("machine_port", "FOCAS port", "int", "Default 8193"),
             ("poll_interval", "Poll every (seconds)", "float", ""),
             ("count_path", "Counter path", "int", "Path used for part count, cycle time & program (1 = Main)"),
+            ("bar_change_mcode", "Bar change M code", "int", "Shown as Bar change while this M code runs (0 = off)"),
+            ("work_counter_signal", "Work counter signal", "str", "Address that is on when 'stop at required count' is enabled, e.g. K5.3 (find it with Signal finder; ! in front inverts)"),
             ("server_url", "Server URL", "str", "Unraid address + port, e.g. http://100.x.y.z:8420 (Tailscale) or http://192.168.1.50:8420"),
             ("api_key", "API key", "str", "Only if you set API_KEY on the Docker container"),
             ("dll_path", "Fwlib32.dll folder", "str", "Leave blank to use the folder the .exe is in"),
@@ -280,6 +285,95 @@ class App:
         self.log_text.tag_configure("ERROR", foreground="#f87171")
         self.log_text.configure(state="disabled")
         return page
+
+    def _build_signals(self, nb):
+        page = tk.Frame(nb, bg=BG, padx=10, pady=8)
+        ttk.Label(page, style="Form.TLabel", wraplength=560, justify="left", text=(
+            "Finds the machine's internal address for a switch, e.g. the work counter 'stop at required count' "
+            "setting.  1) Take snapshot A.  2) Change ONLY that setting on the machine (machine idle is best).  "
+            "3) Take snapshot B.  Repeat with the setting changed back - the address that flips both times is "
+            "the one.  Each snapshot takes about 10-30 seconds.")).pack(anchor="w")
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x", pady=(8, 4))
+        self.snap_a_btn = ttk.Button(row, text="Take snapshot A", command=lambda: self._take_snapshot("A"))
+        self.snap_a_btn.pack(side="left")
+        self.snap_b_btn = ttk.Button(row, text="Take snapshot B + compare", command=lambda: self._take_snapshot("B"),
+                                     state="disabled")
+        self.snap_b_btn.pack(side="left", padx=8)
+        self.snap_prog = ttk.Progressbar(row, maximum=1.0, length=140)
+        self.snap_prog.pack(side="left", padx=(8, 0))
+        self.snap_lbl = ttk.Label(page, text="", style="Muted.TLabel")
+        self.snap_lbl.pack(anchor="w")
+        self.snap_text = ScrolledText(page, height=8, font=self._font(9, False, mono=True), bg="#101317", fg="#d6dae0",
+                                      insertbackground="white", relief="flat", wrap="none")
+        self.snap_text.pack(fill="both", expand=True, pady=(4, 6))
+        use = tk.Frame(page, bg=BG)
+        use.pack(fill="x")
+        ttk.Label(use, text="Work counter signal:", style="Form.TLabel").pack(side="left")
+        self.wc_pick = tk.StringVar(value=self.cfg.work_counter_signal)
+        ttk.Entry(use, textvariable=self.wc_pick, width=12).pack(side="left", padx=6)
+        ttk.Button(use, text="Use & save", command=self._use_wc_signal).pack(side="left")
+        self._snaps: dict[str, dict] = {}
+        return page
+
+    def _take_snapshot(self, which: str):
+        self.snap_a_btn.configure(state="disabled")
+        self.snap_b_btn.configure(state="disabled")
+        self.snap_lbl.configure(text=f"Taking snapshot {which}…")
+        cfg = self.cfg
+
+        def progress(frac, text):
+            self.root.after(0, lambda: (self.snap_prog.configure(value=frac), self.snap_lbl.configure(text=text)))
+
+        def run():
+            m = MockMachine() if cfg.demo_mode else FocasMachine(cfg.machine_ip, cfg.machine_port,
+                                                                  cfg.connect_timeout, cfg.dll_path or None)
+            try:
+                m.connect()
+                snap = signals.snapshot(m, progress)
+                err = None
+            except Exception as e:  # noqa: BLE001
+                snap, err = None, str(e)
+            finally:
+                try:
+                    m.close()
+                except Exception:
+                    pass
+            self.root.after(0, lambda: self._snapshot_done(which, snap, err))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _snapshot_done(self, which: str, snap, err):
+        self.snap_a_btn.configure(state="normal")
+        self.snap_prog.configure(value=0)
+        t = self.snap_text
+        t.configure(state="normal")
+        if err or snap is None:
+            self.snap_lbl.configure(text=f"Snapshot failed: {err}")
+            self.snap_b_btn.configure(state="normal" if "A" in self._snaps else "disabled")
+            return
+        self._snaps[which] = snap
+        size = sum(len(v) for v in snap["pmc"].values())
+        if which == "A":
+            self.snap_lbl.configure(text=f"Snapshot A taken ({size} PMC bytes, {len(snap['macro'])} variables). "
+                                         "Now change the setting on the machine, then take snapshot B.")
+            t.delete("1.0", "end")
+        else:
+            diff = signals.compare(self._snaps["A"], snap)
+            self.snap_lbl.configure(text=f"{sum(1 for d in diff if d and not d.startswith('Also'))} change(s). "
+                                         "B is now the new A - change the setting back and take B again to confirm.")
+            t.delete("1.0", "end")
+            t.insert("end", "\n".join(diff) if diff else "Nothing changed.")
+            log.info("Signal finder: %d difference(s)%s", len(diff), (": " + "; ".join(diff[:8])) if diff else "")
+            self._snaps["A"] = snap
+        self.snap_b_btn.configure(state="normal")
+
+    def _use_wc_signal(self):
+        text = self.wc_pick.get().strip()
+        if text and not parse_signal(text):
+            messagebox.showerror("Work counter signal", "Use an address like K5.3, R120.1, !K5.3 or #512.")
+            return
+        self.vars["work_counter_signal"].set(text)
+        self.apply_settings()
 
     # ------------------------------------------------------------------ services
     def start_services(self):
@@ -363,6 +457,8 @@ class App:
         col, up, cfg = self.collector, self.uploader, self.cfg
         snap = col.state.snapshot if col else {}
         state = snap.get("state", "off")
+        if state == "running" and snap.get("bar_change"):
+            state = "barchange"
         self._draw_pill(state)
         self.detail_lbl.configure(text=snap.get("state_detail") or "")
         self.demo_lbl.configure(text="DEMO MODE — simulated data" if cfg.demo_mode else "")
@@ -397,6 +493,8 @@ class App:
                 sub.append(f"{left} to go · done in ~{fmt_duration(left * snap['last_cycle_s'])}")
             if snap.get("parts_total") is not None:
                 sub.append(f"Total {snap['parts_total']}")
+            if snap.get("work_counter") is not None:
+                sub.append("Stops at count" if snap["work_counter"] else "Won't stop at count")
             self.parts_sub.configure(text="   ".join(sub))
 
         self.cycle_v.configure(text=fmt_duration(snap.get("last_cycle_s")))

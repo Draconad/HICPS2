@@ -68,6 +68,10 @@ struct MachineStatus: Decodable, Equatable {
     var paths: [PathInfo]?
     var activeAlarms: [AlarmEvent]
     var alarmsToday: Int?
+    var barChange: Bool?
+    var barChangeSince: Double?
+    /// Work counter "stop at required count" switch: nil = not set up in the monitor
+    var workCounter: Bool?
 
     /// Seconds to add to server timestamps to get phone time (clock drift between Unraid and the phone).
     var clockOffset: Double = 0
@@ -75,15 +79,16 @@ struct MachineStatus: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case serverTime, machineName, state, stateDetail, stateSince, agentOnline, agentLastSeen, machineConnected,
              demo, parts, partsRequired, partsTotal, lastCycleS, cycleTimerS, cycleStartedAt, etaS, program, paths,
-             activeAlarms, alarmsToday
+             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter
     }
 
     func date(_ serverEpoch: Double?) -> Date? {
         serverEpoch.map { Date(timeIntervalSince1970: $0 + clockOffset) }
     }
 
-    var stateSinceDate: Date? { date(stateSince) }
-    var cycleStart: Date? { state == .running ? date(cycleStartedAt) : nil }
+    var stateSinceDate: Date? { state == .barChange ? (date(barChangeSince) ?? date(stateSince)) : date(stateSince) }
+    var barChangeStart: Date? { state == .barChange ? date(barChangeSince) : nil }
+    var cycleStart: Date? { state.isRunning ? date(cycleStartedAt) : nil }
     var progress: Double {
         guard let p = parts, let r = partsRequired, r > 0 else { return 0 }
         return min(1, Double(p) / Double(r))

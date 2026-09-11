@@ -117,6 +117,19 @@ Tailscale doesn't touch the PC's connection to the lathe (192.168.11.x). If the 
 Closing the window hides it to the tray. It keeps monitoring, and the tray icon colour shows the machine state. To exit, right-click the tray icon → **Quit**.
 Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files. The old script once wrote a 33 MB log.
 
+### Bar change
+While the bar-change M code (**M92** by default; set under **Bar change M code**, 0 turns it off) is the block being executed, the status shows **Bar change** (blue) on the PC app, dashboard, iPhone app and Live Activity, with a timer. The part made across a bar change doesn't count towards the cycle time.
+The log shows how each bar change was spotted, e.g. `Bar change started (Main: M92 active)`. If a bar change happens and nothing is logged, use the Signal finder while one is in progress.
+
+### Work counter "stop at required count"
+Whether the machine stops at the required count is a Hanwha setting, not a standard FANUC one, so its address has to be found once:
+1. Open the **Signal finder** tab with the machine idle. Click **Take snapshot A**.
+2. Change only the work counter on/off setting on the machine, then click **Take snapshot B + compare**.
+3. Change it back and click **Take snapshot B + compare** again. The address that flips both times, e.g. `K5.3`, is the one. Addresses in K, R, E and D are listed first, because they're the likely places for a setting.
+4. Type it into **Work counter signal** and click **Use & save**. Put `!` in front if it reads the wrong way round.
+
+The part count then shows **Stops at count** or **Won't stop at count** everywhere.
+
 **Build the exe on the PC yourself (optional):** run `agent\build.bat`. It needs `uv` or 32-bit Python.
 **Run from source:** `pythonw -m hanwha_agent`. Add `--headless` to log to the console instead of opening the window, or `--demo` to use a simulated machine.
 
@@ -236,6 +249,8 @@ Tick **Demo mode** in the PC app's Settings. It simulates cycles, part counts, s
 | Total parts | parameter 6712 | |
 | Cycle time | Time between part-count increments while running (fallback: CNC cycle timer `cnc_rdtimer` type 3) | "Current cycle" is the live CNC cycle timer. |
 | Program | `cnc_exeprgname` (fallback `cnc_rdprgnum`) + comment from `cnc_rdprogdir3` | |
+| Bar change | `cnc_rdcommand` (M codes in the active block) + `cnc_rdexecprog` (text of the executing block) | Either one showing M92 counts. |
+| Work counter on/off | `pmc_rdpmcrng` (one PMC bit) or `cnc_rdmacro` | The address comes from the Signal finder. |
 
 If the part count or program looks wrong on the real machine, try **Counter path = 2** first. Then send me the PC app's log.
 

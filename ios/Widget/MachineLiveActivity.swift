@@ -17,12 +17,12 @@ struct MachineLiveActivity: Widget {
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             let s = context.state
-            let color = context.isStale ? MachineStateKind.off.color : s.state.color
+            let color = context.isStale ? MachineStateKind.off.color : s.kind.color
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 6) {
                         Circle().fill(color).frame(width: 12, height: 12)
-                        Text(s.state.label)
+                        Text(s.kind.label)
                             .font(.headline)
                             .foregroundStyle(color)
                     }
@@ -48,7 +48,7 @@ struct MachineLiveActivity: Widget {
                         HStack {
                             Label(Fmt.duration(s.lastCycle), systemImage: "timer")
                             Spacer()
-                            if let start = s.cycleStart, s.state == .running, !context.isStale {
+                            if let start = s.cycleStart, s.kind.isRunning, !context.isStale {
                                 Text(start, style: .timer)
                                     .multilineTextAlignment(.trailing)
                                     .frame(maxWidth: 70, alignment: .trailing)
@@ -96,7 +96,7 @@ struct LockScreenView: View {
     let s: MachineActivityAttributes.ContentState
     let stale: Bool
 
-    var color: Color { stale ? MachineStateKind.off.color : s.state.color }
+    var color: Color { stale ? MachineStateKind.off.color : s.kind.color }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -106,8 +106,8 @@ struct LockScreenView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    Image(systemName: s.state.symbol).foregroundStyle(color)
-                    Text(s.state.label.uppercased())
+                    Image(systemName: s.kind.symbol).foregroundStyle(color)
+                    Text(s.kind.label.uppercased())
                         .font(.subheadline.weight(.heavy))
                         .foregroundStyle(color)
                     if !s.program.isEmpty {
@@ -125,7 +125,15 @@ struct LockScreenView: View {
 
                 HStack(alignment: .lastTextBaseline) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("PARTS").font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.55))
+                        HStack(spacing: 4) {
+                            Text("PARTS")
+                            if let on = s.counterStop {
+                                Image(systemName: on ? "stop.circle.fill" : "infinity")
+                                Text(on ? "AUTO STOP" : "NO STOP")
+                            }
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.55))
                         HStack(alignment: .lastTextBaseline, spacing: 3) {
                             Text(s.parts.map { String($0) } ?? "—")
                                 .font(.system(size: 30, weight: .bold, design: .rounded))
@@ -146,7 +154,7 @@ struct LockScreenView: View {
                             .font(.system(size: 22, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(.white)
-                        if let start = s.cycleStart, s.state == .running, !stale {
+                        if let start = s.cycleStart, s.kind.isRunning, !stale {
                             Text(start, style: .timer)
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.white.opacity(0.55))
@@ -174,7 +182,18 @@ struct LockScreenView: View {
                                 .foregroundStyle(.white.opacity(0.6))
                         }
                     }
-                } else if s.state == .off || s.state == .standby {
+                } else if s.kind == .barChange {
+                    HStack(spacing: 4) {
+                        Text("Changing bar")
+                        if let start = s.barChangeStart, !stale {
+                            Text("·")
+                            Text(start, style: .timer)
+                        }
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+                } else if s.kind == .off || s.kind == .standby {
                     Text(s.detail)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.65))

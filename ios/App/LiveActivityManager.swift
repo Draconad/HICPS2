@@ -117,7 +117,9 @@ final class LiveActivityManager: ObservableObject {
             program: program,
             alarms: s.activeAlarms.prefix(3).map(\.summary),
             reachable: reachable,
-            updatedEpoch: Date().timeIntervalSince1970)
+            updatedEpoch: Date().timeIntervalSince1970,
+            barChangeStartEpoch: s.barChangeStart?.timeIntervalSince1970,
+            counterStop: s.workCounter)
     }
 
     /// One-line summary shown in Settings to help work out why nothing appears.

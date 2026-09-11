@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 
 from .config import VERSION, Config
-from .focas import FocasError, FocasMachine, MockMachine, RawAlarm
+from .focas import FocasError, FocasMachine, MockMachine, RawAlarm, parse_signal
 
 log = logging.getLogger("hanwha.collector")
 
@@ -63,6 +64,12 @@ class Collector:
         self._prev_timer: float | None = None
         self._comment_cache: dict[int, tuple[str, float]] = {}
         self._last_state: str | None = None
+        # bar change detection
+        self._bar_in_cycle = False          # a bar change happened since the last part was counted
+        self._bar_since: float | None = None
+        self._bar_methods_failed: set[str] = set()
+        self._work_counter: bool | None = None
+        self._wc_error = ""
         self.listeners: list = []   # callables(snapshot)
 
     # ------------------------------------------------------------------
@@ -189,8 +196,68 @@ class Collector:
             if e.is_connection_error:
                 raise
 
+        wc = None
+        sig = parse_signal(cfg.work_counter_signal)
+        if sig:
+            try:
+                wc = m.read_signal(sig)
+                self._wc_error = ""
+            except FocasError as e:
+                if e.is_connection_error:
+                    raise
+                if str(e) != self._wc_error:
+                    log.warning("Can't read work counter signal %s: %s", cfg.work_counter_signal, e)
+                self._wc_error = str(e)
+        elif cfg.work_counter_signal.strip() and not self._wc_error:
+            self._wc_error = "invalid"
+            log.warning("Work counter signal '%s' isn't a valid address (examples: K5.3, R120.1, #512)",
+                        cfg.work_counter_signal)
+        if wc is not None and wc != self._work_counter:
+            log.info("Work counter stop %s", "ENABLED" if wc else "disabled")
+        self._work_counter = wc
+
+        bar, how = False, ""
+        if cfg.bar_change_mcode and any(p["run_code"] in (3, 4) for p in paths):
+            bar, how = self._detect_bar_change(paths)
+
         return {"paths": paths, "alarms": alarms, "parts": parts, "required": required, "total": total,
-                "timer": timer, "program": {"number": prog_num, "name": prog_name, "comment": comment}}
+                "timer": timer, "program": {"number": prog_num, "name": prog_name, "comment": comment},
+                "bar_change": bar, "bar_how": how, "work_counter": wc}
+
+    def _detect_bar_change(self, paths: list[dict]) -> tuple[bool, str]:
+        """True while the bar-change M code (M92) is the block being executed on a running path.
+        Two independent checks, so it works whether the M code is handled by the machine's PMC
+        (the M92 block stays active until the bar is loaded) or shows up in the program text."""
+        code = int(self.cfg.bar_change_mcode)
+        pattern = re.compile(rf"(?<![A-Z#])M0*{code}(?!\d)", re.I)
+        hows = []
+        for p in paths:
+            if p["run_code"] not in (3, 4):
+                continue
+            num, name = p["path"], p["name"]
+            if "mcode" not in self._bar_methods_failed:
+                try:
+                    ms = self.machine.active_mcodes(num)
+                    # respect the "commanded in this block" flag if the control sets it on anything
+                    uses_flag = any(f & 0x8000 for _, f in ms)
+                    if any(v == code and (f & 0x8000 or not uses_flag) for v, f in ms):
+                        hows.append(f"{name}: M{code} active")
+                except FocasError as e:
+                    if e.is_connection_error:
+                        raise
+                    self._bar_methods_failed.add("mcode")
+                    log.info("Bar change: can't read active M codes (%s) - using the program text only", e)
+            if "block" not in self._bar_methods_failed:
+                try:
+                    line = self.machine.exec_block(num)
+                    if line and pattern.search(re.sub(r"\(.*?\)", "", line)):
+                        hows.append(f"{name}: '{line[:40]}'")
+                except FocasError as e:
+                    if e.is_connection_error:
+                        raise
+                    self._bar_methods_failed.add("block")
+                    log.info("Bar change: can't read the executing block (%s) - using active M codes only", e)
+        return bool(hows), "; ".join(hows)
 
     def _comment(self, number: int) -> str:
         cached = self._comment_cache.get(number)
@@ -230,13 +297,19 @@ class Collector:
                     self._pending_cleared.append(ep)
                     self._pending_cleared = self._pending_cleared[-200:]
 
-    def _update_cycle(self, now: float, running: bool, parts: int | None, timer: float | None):
+    def _update_cycle(self, now: float, running: bool, parts: int | None, timer: float | None, bar: bool = False):
         if not running:
             self._uninterrupted = False
+        if bar:
+            self._bar_in_cycle = True
         if parts is not None:
             if self._last_parts is not None and parts > self._last_parts:
                 k = parts - self._last_parts
-                if self._last_part_time is not None and self._uninterrupted and k <= 5:
+                if self._bar_in_cycle:
+                    # this part's time includes a bar change - don't let it skew the cycle time
+                    self._bar_in_cycle = bar
+                    log.info("Part counted after a bar change - keeping the previous cycle time")
+                elif self._last_part_time is not None and self._uninterrupted and k <= 5:
                     self._last_cycle_s = round((now - self._last_part_time) / k, 1)
                 elif self._prev_timer and self._prev_timer > 1:
                     # fall back to the CNC cycle timer value just before the part was counted
@@ -267,7 +340,7 @@ class Collector:
             prev = self.state.snapshot or {}
             state = prev.get("state", "off") if self.state.machine_connected else "off"
             base.update({k: prev.get(k) for k in ("parts", "parts_required", "parts_total", "last_cycle_s", "program",
-                                                  "paths")})
+                                                  "paths", "work_counter")})
             base.update({
                 "state": state,
                 "state_detail": "Machine off / unreachable" if state == "off" else prev.get("state_detail", ""),
@@ -281,7 +354,14 @@ class Collector:
         running = any(p["run_code"] in (3, 4) for p in paths)
         emergency = any(p["emergency"] for p in paths)
         self._update_alarms(now, data["alarms"])
-        self._update_cycle(now, running, data["parts"], data["timer"])
+        bar = bool(data.get("bar_change")) and running
+        self._update_cycle(now, running, data["parts"], data["timer"], bar)
+        if bar and self._bar_since is None:
+            self._bar_since = now
+            log.info("Bar change started (%s)", data.get("bar_how"))
+        elif not bar and self._bar_since is not None:
+            log.info("Bar change finished after %.0f s", now - self._bar_since)
+            self._bar_since = None
 
         if self._active or emergency or any(p["alarm"] for p in paths):
             state = "alarm"
@@ -292,7 +372,8 @@ class Collector:
                 detail = "Emergency stop" if emergency else "Alarm"
         elif running:
             state = "running"
-            detail = " / ".join(f"{p['name']} {p['mode']} {p['run']}" for p in paths)
+            detail = (f"Bar change (M{self.cfg.bar_change_mcode})" if bar else
+                      " / ".join(f"{p['name']} {p['mode']} {p['run']}" for p in paths))
         else:
             state = "standby"
             runs = {p["run"] for p in paths}
@@ -312,6 +393,9 @@ class Collector:
             "paths": [{k: v for k, v in p.items() if k != "run_code"} for p in paths],
             "alarms": alarm_payload,
             "error": "",
+            "bar_change": bar and state == "running",
+            "bar_change_how": data.get("bar_how") if bar else "",
+            "work_counter": data.get("work_counter"),   # None = not configured / unreadable
         })
         return base
 

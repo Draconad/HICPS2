@@ -68,6 +68,7 @@ struct APIClient {
 
     func status() async throws -> MachineStatus {
         var s = try await send(try request("/api/status"), as: MachineStatus.self)
+        if s.barChange == true && s.state == .running { s.state = .barChange }
         s.clockOffset = Date().timeIntervalSince1970 - s.serverTime
         if abs(s.clockOffset) < 2 { s.clockOffset = 0 }
         return s

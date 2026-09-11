@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -124,6 +125,38 @@ class ODBEXEPRG(ctypes.Structure):  # cnc_exeprgname
 class ODBPRO(ctypes.Structure):  # cnc_rdprgnum (short variant)
     _pack_ = 4
     _fields_ = [("dummy", ctypes.c_short * 2), ("data", ctypes.c_short), ("mdata", ctypes.c_short)]
+
+
+class ODBCMD(ctypes.Structure):  # cnc_rdcommand (one commanded address, e.g. M92)
+    _pack_ = 4
+    _fields_ = [("adrs", ctypes.c_char), ("num", ctypes.c_char), ("flag", ctypes.c_short),
+                ("cmd_val", ctypes.c_long), ("dec_val", ctypes.c_long)]
+
+
+PMC_AREAS = {"G": 0, "F": 1, "Y": 2, "X": 3, "A": 4, "R": 5, "T": 6, "K": 7, "C": 8, "D": 9, "E": 12}
+PMC_CHUNK = 200   # bytes per pmc_rdpmcrng call
+
+
+class IODBPMC(ctypes.Structure):  # pmc_rdpmcrng, byte data
+    _pack_ = 4
+    _fields_ = [("type_a", ctypes.c_short), ("type_d", ctypes.c_short),
+                ("datano_s", ctypes.c_ushort), ("datano_e", ctypes.c_ushort),
+                ("cdata", ctypes.c_ubyte * PMC_CHUNK)]
+
+
+_SIGNAL_RE = re.compile(r"^\s*(!?)\s*(?:([GFYXARTKCDE])\s*(\d+)(?:\.([0-7]))?|#\s*(\d+))\s*$", re.I)
+
+
+def parse_signal(text: str):
+    """'K5.3', '!R120.1', 'D200' (byte, non-zero = on) or '#512' (macro variable, non-zero = on).
+    Returns (invert, area or '#', number, bit or None), or None if blank/invalid."""
+    m = _SIGNAL_RE.match(text or "")
+    if not m:
+        return None
+    inv = bool(m.group(1))
+    if m.group(5):
+        return inv, "#", int(m.group(5)), None
+    return inv, m.group(2).upper(), int(m.group(3)), (int(m.group(4)) if m.group(4) is not None else None)
 
 
 class _PrgDate(ctypes.Structure):
@@ -266,6 +299,9 @@ def load_library(configured: str | None = None):
         "cnc_rdprgnum": [US, P(ODBPRO)],
         "cnc_rdprogdir3": [US, S, P(L), P(S), P(PRGDIR3)],
         "cnc_rdparam": [US, S, S, S, P(IODBPSD)],
+        "cnc_rdcommand": [US, S, S, P(S), P(ODBCMD)],
+        "cnc_rdexecprog": [US, P(US), P(S), P(ctypes.c_char)],
+        "pmc_rdpmcrng": [US, S, S, US, US, US, P(IODBPMC)],
     }
     for name, args in sigs.items():
         fn = getattr(lib, name)
@@ -378,6 +414,53 @@ class FocasMachine:
         self._check("cnc_rdprgnum", _lib.cnc_rdprgnum(self.handle, ctypes.byref(p)))
         return (p.data or None), (f"O{p.data:04d}" if p.data else "")
 
+    def active_mcodes(self, path: int) -> list[tuple[int, int]]:
+        """M codes commanded in the block being executed, as (value, flag) pairs (cnc_rdcommand)."""
+        self.set_path(path)
+        buf = (ODBCMD * 30)()
+        n = ctypes.c_short(30)
+        # type -2 = all commanded data, block 1 = the active block
+        self._check("cnc_rdcommand", _lib.cnc_rdcommand(self.handle, -2, 1, ctypes.byref(n), buf))
+        out = []
+        for c in buf[: max(0, min(n.value, 30))]:
+            if c.adrs.upper() != b"M":
+                continue
+            val = c.cmd_val / (10 ** c.dec_val) if 0 < c.dec_val < 9 else c.cmd_val
+            out.append((int(round(val)), c.flag & 0xFFFF))
+        return out
+
+    def exec_block(self, path: int) -> str:
+        """Text of the NC block being executed (first block cnc_rdexecprog returns)."""
+        self.set_path(path)
+        buf = ctypes.create_string_buffer(512)
+        length = ctypes.c_ushort(500)
+        blocks = ctypes.c_short(0)
+        self._check("cnc_rdexecprog", _lib.cnc_rdexecprog(self.handle, ctypes.byref(length), ctypes.byref(blocks), buf))
+        text = buf.raw[: min(length.value, 500)].split(b"\x00", 1)[0].decode("latin-1", errors="replace")
+        lines = [ln.strip() for ln in re.split(r"[\r\n;]", text)]
+        lines = [ln for ln in lines if ln and ln != "%"]
+        return lines[0] if lines else ""
+
+    def pmc_bytes(self, area: str, start: int, count: int) -> bytes:
+        """Read `count` (<= PMC_CHUNK) bytes of a PMC area, e.g. ('K', 0, 100)."""
+        count = max(1, min(count, PMC_CHUNK))
+        buf = IODBPMC()
+        ret = _lib.pmc_rdpmcrng(self.handle, PMC_AREAS[area], 0, start, start + count - 1, 8 + count,
+                                ctypes.byref(buf))
+        self._check("pmc_rdpmcrng", ret)
+        return bytes(buf.cdata[:count])
+
+    def read_signal(self, sig) -> bool:
+        """Current state of a parsed signal (see parse_signal)."""
+        inv, area, num, bit = sig
+        if area == "#":
+            v = self.macro(1, num)
+            on = bool(v)
+        else:
+            b = self.pmc_bytes(area, num, 1)[0]
+            on = bool(b >> bit & 1) if bit is not None else b != 0
+        return on != inv
+
     def program_comment(self, path: int, number: int) -> str:
         self.set_path(path)
         top = ctypes.c_long(number)
@@ -424,10 +507,14 @@ class MockMachine:
             self.cycle_len = 22.0 + random.uniform(-0.6, 0.6)
         if now >= self.phase_until:
             if self.phase == "running":
-                self.phase = random.choice(["standby", "alarm"])
+                self.phase = random.choice(["standby", "alarm", "barchange"])
                 if self.phase == "alarm":
                     self.alarm = RawAlarm(*random.choice(self.DEMO_ALARMS))
-                self.phase_until = now + 45
+                self.phase_until = now + (30 if self.phase == "barchange" else 45)
+            elif self.phase == "barchange":   # new bar loaded - carry on with the job
+                self.phase = "running"
+                self.cycle_start = now
+                self.phase_until = now + 150
             else:
                 self.phase, self.alarm = "running", None
                 self.cycle_start = now
@@ -435,7 +522,7 @@ class MockMachine:
 
     def status(self, path: int) -> PathStatus:
         self._tick()
-        run = {"running": 3, "standby": 0, "alarm": 1}[self.phase]
+        run = {"running": 3, "barchange": 3, "standby": 0, "alarm": 1}[self.phase]
         return PathStatus(mode="MEM", run=RUN_STATES[run], run_code=run, emergency=False,
                           alarm=self.phase == "alarm" and path == 1)
 
@@ -449,7 +536,34 @@ class MockMachine:
         return {6711: self.parts, 6713: self.required, 6712: 40000 + self.parts}.get(number, 0)
 
     def cycle_timer(self, path: int) -> float:
-        return (time.time() - self.cycle_start) if self.phase == "running" else 0.0
+        return (time.time() - self.cycle_start) if self.phase in ("running", "barchange") else 0.0
+
+    def active_mcodes(self, path: int) -> list[tuple[int, int]]:
+        return [(92, 0x8000)] if (self.phase == "barchange" and path == 1) else []
+
+    def pmc_bytes(self, area: str, start: int, count: int) -> bytes:
+        if area == "K" and start + count > 99:
+            raise FocasError("pmc_rdpmcrng", 3)
+        if area not in ("K", "R", "X"):
+            raise FocasError("pmc_rdpmcrng", 3)
+        data = bytearray(count)
+        if area == "K" and start <= 5 < start + count:
+            data[5 - start] = 0x08          # K5.3 = demo "work counter stop" on
+        if area == "X" and start <= 8 < start + count:
+            data[8 - start] = 0x20 if self.phase == "running" else 0
+        return bytes(data)
+
+    def read_signal(self, sig) -> bool:
+        inv, area, num, bit = sig
+        if area == "#":
+            return bool(self.macro(1, num)) != inv
+        b = self.pmc_bytes(area, num, 1)[0]
+        return (bool(b >> bit & 1) if bit is not None else b != 0) != inv
+
+    def exec_block(self, path: int) -> str:
+        if self.phase == "barchange" and path == 1:
+            return "N9000 M92"
+        return "G01 X4.2 Z-12.5 F0.03" if self.phase == "running" else ""
 
     def program(self, path: int):
         return 1234, "O1234"

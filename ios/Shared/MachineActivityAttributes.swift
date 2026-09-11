@@ -4,6 +4,10 @@ import SwiftUI
 /// Machine state as reported by the server.
 enum MachineStateKind: String, Codable, Hashable, CaseIterable {
     case running, standby, alarm, off
+    case barChange = "barchange"
+
+    /// Bar change is part of running a job: the cycle clock keeps going and it isn't a stop.
+    var isRunning: Bool { self == .running || self == .barChange }
 
     init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -16,6 +20,7 @@ enum MachineStateKind: String, Codable, Hashable, CaseIterable {
         case .standby: return "Standby"
         case .alarm: return "Alarm"
         case .off: return "Off"
+        case .barChange: return "Bar change"
         }
     }
 
@@ -25,6 +30,7 @@ enum MachineStateKind: String, Codable, Hashable, CaseIterable {
         case .standby: return Color(red: 1.00, green: 0.78, blue: 0.10)
         case .alarm: return Color(red: 0.96, green: 0.23, blue: 0.23)
         case .off: return Color(red: 0.56, green: 0.58, blue: 0.62)
+        case .barChange: return Color(red: 0.20, green: 0.55, blue: 1.00)
         }
     }
 
@@ -34,6 +40,7 @@ enum MachineStateKind: String, Codable, Hashable, CaseIterable {
         case .standby: return "pause.circle.fill"
         case .alarm: return "exclamationmark.triangle.fill"
         case .off: return "power.circle.fill"
+        case .barChange: return "arrow.triangle.2.circlepath.circle.fill"
         }
     }
 }
@@ -54,7 +61,15 @@ struct MachineActivityAttributes: ActivityAttributes {
         var alarms: [String]
         var reachable: Bool
         var updatedEpoch: Double
+        /// Server push payloads keep state "running" (so older app builds still understand them) and flag a
+        /// bar change separately; `kind` combines the two.
+        var barChange: Bool?
+        var barChangeStartEpoch: Double?
+        /// Work counter "stop at required count": true = on, false = off, nil = not known
+        var counterStop: Bool?
 
+        var kind: MachineStateKind { barChange == true && state == .running ? .barChange : state }
+        var barChangeStart: Date? { barChangeStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var cycleStart: Date? { cycleStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var updated: Date { Date(timeIntervalSince1970: updatedEpoch) }
 
