@@ -10,6 +10,7 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/states     state change log (?hours=24)
   PUT  /api/agent/update?version=X  (exe body, X-Signature header)   GET /api/agent/update   GET /api/agent/update/download
   GET  /api/barchanges   bar change history
+  GET  /api/bars   parts per bar per program + recent bars      DELETE /api/bars?program=O1234   forget a program's bars
   GET  /api/messages   operator message history (?limit=100) - e.g. "work count end in 1 hour", not alarms
   GET  /api/health
   POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
@@ -95,6 +96,10 @@ def _connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS bar_changes (started_at REAL NOT NULL, ended_at REAL NOT NULL, duration_s REAL NOT NULL,
             parts INTEGER, demo INTEGER);
         CREATE INDEX IF NOT EXISTS bar_changes_started ON bar_changes(started_at DESC);
+        -- one row per whole bar: how many parts it made, against the main program that was running
+        CREATE TABLE IF NOT EXISTS bars (id INTEGER PRIMARY KEY AUTOINCREMENT, program TEXT NOT NULL, parts INTEGER NOT NULL,
+            started_at REAL NOT NULL, ended_at REAL NOT NULL, demo INTEGER);
+        CREATE INDEX IF NOT EXISTS bars_program ON bars(program, ended_at DESC);
     """)
     cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
     if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
@@ -284,6 +289,91 @@ def bar_change_stats(now: float) -> dict:
             "alert_after_s": BAR_CHANGE_ALERT}
 
 
+# ---- parts per bar, remembered per program -------------------------------------------------------------
+# A bar runs from the start of one bar change to the start of the next. The parts made in between are stored
+# against the main program, so when that program is loaded again the parts per bar (and how many bars the job
+# still needs) are known straight away.
+BAR_HISTORY = 10          # average over this many recent bars of the program
+
+
+def program_key(prog: dict | None) -> str | None:
+    prog = prog or {}
+    if prog.get("number"):
+        return f"O{int(prog['number']):04d}"
+    return (prog.get("name") or "").strip() or None
+
+
+def _bar_count(snap: dict):
+    """The counter a bar is measured with: the machine's total parts counter if there is one (operators reset the
+    part counter, rarely the total), otherwise the part counter."""
+    total = snap.get("parts_total")
+    if isinstance(total, (int, float)) and total > 0:
+        return "total", int(total)
+    parts = snap.get("parts")
+    return ("parts", int(parts)) if isinstance(parts, (int, float)) else (None, None)
+
+
+def record_bar(snap: dict, now: float, demo: bool):
+    """Called when a bar change starts: closes the previous bar and starts counting the next one."""
+    key = program_key(snap.get("program"))
+    kind, n = _bar_count(snap)
+    prev = meta.get("bar_start")
+    meta["bar_start"] = {"program": key, "kind": kind, "n": n, "at": now, "demo": bool(demo)} if key and kind else None
+    if not prev or not key or kind is None:
+        return
+    if (prev.get("program"), prev.get("kind"), bool(prev.get("demo"))) != (key, kind, bool(demo)):
+        return                                   # program or counter changed part way through the bar
+    made = n - prev["n"]
+    if not 1 <= made <= 20000 or now - prev["at"] > 7 * 86400:
+        return                                   # counter reset, or a gap too long to trust
+    db.execute("INSERT INTO bars(program,parts,started_at,ended_at,demo) VALUES(?,?,?,?,?)",
+               (key, made, prev["at"], now, int(demo)))
+    log.info("Bar finished on %s: %d parts", key, made)
+
+
+def parts_per_bar(key: str | None, demo: bool) -> dict | None:
+    if not key:
+        return None
+    vals = [r["parts"] for r in db.execute(
+        "SELECT parts FROM bars WHERE program=? AND COALESCE(demo,0)=? ORDER BY ended_at DESC LIMIT ?",
+        (key, int(demo), BAR_HISTORY * 2)).fetchall()]
+    if not vals:
+        return None
+    med = sorted(vals)[len(vals) // 2]
+    # leave out odd ones (a missed bar change counts double, a short remnant bar counts low)
+    good = [v for v in vals if 0.6 * med <= v <= 1.4 * med][:BAR_HISTORY] or vals[:BAR_HISTORY]
+    return {"program": key, "avg": round(sum(good) / len(good), 1), "bars": len(good)}
+
+
+def bar_forecast(now: float) -> dict | None:
+    """Parts per bar for the loaded program, and how many more bars the job needs."""
+    key = program_key(latest.get("program"))
+    pb = parts_per_bar(key, bool(latest.get("demo")))
+    if not pb:
+        return {"program": key, "avg": None} if key else None
+    avg = pb["avg"]
+    start = meta.get("bar_start") or {}
+    kind, n = _bar_count(latest)
+    into = None
+    if latest.get("bar_change"):
+        into = 0
+    elif start.get("program") == key and start.get("kind") == kind and n is not None and n >= start.get("n", n + 1):
+        into = n - start["n"]
+    pb["into_bar"] = into
+    parts, req = latest.get("parts"), latest.get("parts_required")
+    left = (req - parts) if (req and parts is not None and req > parts) else None
+    pb["parts_left"] = left
+    if left and avg > 0:
+        import math
+        if into is not None:
+            on_bar = max(0, round(avg - into))
+            pb["left_on_bar"] = on_bar
+            pb["more_bars"] = 0 if left <= on_bar else math.ceil((left - on_bar) / avg)
+        else:
+            pb["bars_total"] = math.ceil(left / avg)   # don't know how far into the current bar it is
+    return pb
+
+
 def message_rows(active_only: bool, limit: int = 100) -> list[dict]:
     sql = "SELECT * FROM op_messages" + (" WHERE cleared_at IS NULL" if active_only else "") + \
           " ORDER BY started_at DESC LIMIT ?"
@@ -324,6 +414,7 @@ def ingest(snap: dict) -> dict:
         if snap["bar_change"] != bool(latest.get("bar_change")):
             if snap["bar_change"]:
                 meta["bar_change_since"] = now
+                record_bar(snap, now, demo)
                 log.info("Bar change started (%s)", snap.get("bar_change_how") or "")
             else:
                 since = meta.get("bar_change_since")
@@ -395,7 +486,7 @@ def status() -> dict:
             # when the job should finish (machine running, target set) - "done at 17:40"
             "finish_at": round(now + eta) if (eta and state in ("running",)) else None,
             "job_complete": meta.get("job_complete"),
-            "bar_changes": bar_change_stats(now),
+            "bar_changes": {**bar_change_stats(now), "per_bar": bar_forecast(now)},
             # still running after reaching the required count (the work counter isn't stopping it)
             "over_producing": bool(running and not bar_change and req and parts is not None
                                    and (parts > req or (parts == req and latest.get("state") == "running"
@@ -673,6 +764,23 @@ class Handler(BaseHTTPRequestHandler):
                 with _lock:
                     rows = db.execute("SELECT * FROM bar_changes ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
                 return self._json({"bar_changes": [dict(r) for r in rows]})
+            if method == "GET" and path == "/api/bars":
+                # parts per bar, per program (what the forecast is based on), plus the recent bars
+                with _lock:
+                    progs = db.execute("SELECT program, COUNT(*) n, MAX(ended_at) last FROM bars WHERE COALESCE(demo,0)=0 "
+                                       "GROUP BY program ORDER BY last DESC").fetchall()
+                    out = [{**(parts_per_bar(r["program"], False) or {}), "recorded": r["n"], "last_at": r["last"]}
+                           for r in progs]
+                    recent = [dict(r) for r in db.execute("SELECT * FROM bars ORDER BY ended_at DESC LIMIT 100")]
+                return self._json({"programs": out, "bars": recent})
+            if method == "DELETE" and path == "/api/bars":
+                # forget a program's bars (e.g. after changing bar length or the part): ?program=O1234
+                prog = (qs.get("program") or [""])[0].strip()
+                if not prog:
+                    return self._json({"ok": False, "error": "program= is required"}, 400)
+                with _lock:
+                    n = db.execute("DELETE FROM bars WHERE program=?", (prog,)).rowcount
+                return self._json({"ok": True, "deleted": n})
             if method == "GET" and path == "/api/messages":
                 limit = max(1, min(500, int((qs.get("limit") or ["100"])[0])))
                 with _lock:

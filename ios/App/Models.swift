@@ -96,6 +96,19 @@ struct MachineStatus: Decodable, Equatable {
         var lastS: Double?
         var lastAt: Double?
         var alertAfterS: Double?
+        var perBar: PerBar?
+    }
+
+    /// Parts per bar, learnt per program (so it's known as soon as a program that has run before is loaded)
+    struct PerBar: Decodable, Equatable {
+        var program: String?
+        var avg: Double?           // nil = still learning this program
+        var bars: Int?             // how many bars the average is over
+        var intoBar: Int?          // parts made on the current bar so far
+        var partsLeft: Int?
+        var leftOnBar: Int?        // roughly how many more the current bar will make
+        var moreBars: Int?         // bars still to load after this one
+        var barsTotal: Int?        // when it isn't known how far into the current bar it is
     }
 
     struct OpMessage: Decodable, Equatable, Identifiable {

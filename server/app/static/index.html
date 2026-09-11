@@ -16,7 +16,20 @@
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
-  main { max-width: 880px; margin: 0 auto; padding: 20px 16px 40px; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+  /* wide windows: the camera sits beside the status and figures; alarms run full width underneath */
+  @media (min-width: 1180px) {
+    main { padding-inline: 28px; }
+    main.has-cam { max-width: 1560px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+                   column-gap: 24px; align-items: start; }
+    main.has-cam > header, main.has-cam > .alarmsec, main.has-cam > .footrow { grid-column: 1 / -1; }
+    main.has-cam > .top { grid-column: 1; }
+    main.has-cam > .camwrap { grid-column: 2; margin-top: 0; }
+    main.has-cam > .camwrap .camhead { margin-top: 0; }
+    main.has-cam .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 1800px) { main.has-cam { max-width: 1900px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); } }
+  @media (max-width: 600px) { .value { font-size: 24px; } td, th { padding: 8px 6px; } }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
   h1 { font-size: 20px; margin: 0; }
   .sub { color: var(--muted); font-size: 13px; }
@@ -48,7 +61,11 @@
   .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
   @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .pair { display: flex; gap: 22px; flex-wrap: wrap; }
+  .pair .sub { margin-top: -2px; }
+  #bcsub { margin-top: 6px; }
+  #bcneed { margin-top: 4px; color: var(--ink); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
   .label { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
   .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
@@ -127,6 +144,7 @@
       <div class="sub" id="seen">Loading…</div>
     </div>
   </header>
+  <div class="top">
   <section class="status s-off" id="status" aria-live="polite">
     <div class="ico" id="sticon">&#9711;</div>
     <div class="main">
@@ -146,10 +164,14 @@
     <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
     <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
     <div class="card"><div class="label">Program</div><div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
-    <div class="card" id="bccard" hidden><div class="label">Bar changes today</div><div class="value" id="bctoday">—</div><div class="sub" id="bcsub"></div></div>
+    <div class="card" id="bccard" hidden><div class="label">Bar changes</div>
+      <div class="pair"><div><div class="value" id="bctoday">—</div><div class="sub">today</div></div>
+        <div id="ppbwrap"><div class="value" id="ppb">—</div><div class="sub">parts / bar</div></div></div>
+      <div class="sub" id="bcsub"></div><div class="sub" id="bcneed"></div></div>
   </div>
 
   <div class="msgs" id="msgs"></div>
+  </div>
 
   <div class="camwrap" id="camcard" hidden>
     <button class="camhead" id="camhead" aria-expanded="true">
@@ -178,6 +200,7 @@
     </div>
   </div>
 
+  <section class="alarmsec">
   <h2>Active alarms</h2>
   <div class="card wrap"><table><tbody id="active"><tr><td class="muted">None</td></tr></tbody></table></div>
 
@@ -189,6 +212,7 @@
     <thead><tr><th>Time</th><th>Code</th><th>Message</th><th>Path</th><th>Duration</th></tr></thead>
     <tbody id="history"></tbody>
   </table></div>
+  </section>
   <div class="footrow">
     <p class="sub" id="foot"></p>
     <p class="sub"><span id="who"></span> &middot; <a href="login?change=1">Change login</a> &middot; <a href="#" id="logout">Log out</a><span id="forget" hidden> &middot; <a href="#" id="forgetlink" title="Log out and ask for the API key again next time">Log out &amp; forget this browser</a></span></p>
@@ -270,8 +294,21 @@ async function status() {
   $("msgs").innerHTML = (s.messages || []).map(m =>
     `<div class="msg">&#128172; ${esc(m.text || "Message " + m.number)}<span class="t">since ${t(m.started_at)}</span></div>`).join("");
   const bc = s.bar_changes || {};
-  $("bccard").hidden = !(bc.today || bc.last_s);
+  const pb = bc.per_bar;
+  $("bccard").hidden = !(bc.today || bc.last_s || pb);
   $("bctoday").textContent = bc.today || 0;
+  // parts per bar: learnt per program, so it's known as soon as a program that has run before is loaded
+  $("ppb").textContent = pb && pb.avg ? "~" + Math.round(pb.avg) : "—";
+  $("ppbwrap").title = pb && pb.avg ? `${pb.program}: average of the last ${pb.bars} bar${pb.bars === 1 ? "" : "s"}` : "";
+  let need = "";
+  if (pb && !pb.avg) need = `<span class="muted">${esc(pb.program)}: learning parts per bar - shown after its first full bar</span>`;
+  else if (pb && pb.parts_left) {
+    if (pb.more_bars === 0) need = `${esc(pb.program)}: finishes on this bar (~${pb.left_on_bar} parts left on it)`;
+    else if (pb.more_bars != null) need = `${esc(pb.program)}: ~${pb.more_bars} more bar${pb.more_bars === 1 ? "" : "s"} needed`
+                                         + (pb.left_on_bar > 0 ? ` <span class="muted">(+ ~${pb.left_on_bar} parts left on this one)</span>` : "");
+    else if (pb.bars_total != null) need = `${esc(pb.program)}: ~${pb.bars_total} bar${pb.bars_total === 1 ? "" : "s"} for the ${pb.parts_left} parts left`;
+  } else if (pb && pb.avg) need = `<span class="muted">${esc(pb.program)} &middot; average of ${pb.bars} bar${pb.bars === 1 ? "" : "s"}</span>`;
+  $("bcneed").innerHTML = need;
   $("bcsub").innerHTML = [bc.avg_today_s || bc.avg_week_s ? `Average ${span(bc.avg_today_s || bc.avg_week_s)}` : "",
     bc.last_s ? `Last ${span(bc.last_s)}${bc.last_at ? " at " + new Date(bc.last_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}` : "",
     bc.avg_week_s && bc.avg_today_s ? `7-day average ${span(bc.avg_week_s)}` : ""].filter(Boolean).join("<br>");
@@ -423,7 +460,11 @@ async function camTick() {
 // the camera section can be folded away (remembered in this browser); folded = no video is streamed
 let camCollapsed = false;
 try { camCollapsed = localStorage.getItem("camCollapsed") === "1"; } catch (e) {}
+function camLayout() {
+  document.querySelector("main").classList.toggle("has-cam", !$("camcard").hidden && !camCollapsed);
+}
 function camFold() {
+  camLayout();
   $("cambody").hidden = camCollapsed;
   $("camhead").setAttribute("aria-expanded", String(!camCollapsed));
   $("camhint").textContent = camCollapsed ? "hidden - click to show" : "";
@@ -510,8 +551,9 @@ function camFeatures(c) {
 }
 
 function camUpdate(c) {
-  if (!c || !c.available) { $("camcard").hidden = true; return; }
+  if (!c || !c.available) { $("camcard").hidden = true; camLayout(); return; }
   $("camcard").hidden = false;
+  camLayout();
   camFeatures(c);
   camStart();
 }

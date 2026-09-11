@@ -150,6 +150,13 @@ While the machine is running towards a required count, the part count shows the 
 ### Bar change statistics
 Every bar change is timed. The dashboard and the app's Status screen show today's count, the average and the last one, plus a 7-day average. A bar change that takes longer than `BAR_CHANGE_ALERT` seconds (3 minutes by default) sends a **⏳ Bar change taking long** notification, which usually means the bar didn't load. The history is at `/api/barchanges`.
 
+### Parts per bar
+Each bar is counted from the start of one bar change to the start of the next, using the machine's total parts counter, so resetting the part counter doesn't spoil it. The count is stored against the main program number. When a program that has run before is loaded, the Bar changes card shows its parts per bar straight away, averaged over its last 10 bars. Odd bars, such as a short remnant or a missed bar change, are left out of the average. It also shows how many more bars the job needs to reach the required count, e.g. "O1234: ~3 more bars needed (+ ~18 on this one)". A new program shows "learning" until its first full bar.
+The data is at `/api/bars`. To make a program start learning again, e.g. after changing the bar length, delete its bars with `DELETE /api/bars?program=O1234`.
+
+### Dashboard on different screen sizes
+On a wide screen, the camera sits beside the status and figures, with the alarms full width underneath. On a narrower window or a phone, everything stacks in one column.
+
 ### Automatic updates of this app
 From version 1.8.0 the PC app updates itself, so the exe only has to be copied to the machine PC once.
 1. `push-to-github.bat` stores the update-signing key as a GitHub secret the first time it runs (from `update-signing-key.txt`, which it then deletes). GitHub Actions signs every Windows build with it.

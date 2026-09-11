@@ -8,16 +8,26 @@ struct StatusView: View {
     @State private var cameraFullScreen = false
     @AppStorage(SettingsKey.showCamera) private var showCamera = true
     @AppStorage("cameraCollapsed") private var cameraCollapsed = false
+    /// the big status header has scrolled off the top: show the slim status bar there instead
+    @State private var pinned = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    Text(store.status?.machineName ?? "Machine")
+                        .font(.largeTitle.weight(.bold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
                     if let err = store.error {
                         ConnectionBanner(message: err, lastSuccess: store.lastSuccess)
                     }
                     if let s = store.status {
                         StateHeader(s: s)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: HeaderBottomKey.self,
+                                                       value: g.frame(in: .named("statusScroll")).maxY)
+                            })
                         if let msgs = s.messages, !msgs.isEmpty {
                             MessagesCard(messages: msgs, offset: s.clockOffset)
                         }
@@ -36,7 +46,7 @@ struct StatusView: View {
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         ProgramCard(s: s)
-                        if let bc = s.barChanges, (bc.today ?? 0) > 0 || bc.lastS != nil {
+                        if let bc = s.barChanges, (bc.today ?? 0) > 0 || bc.lastS != nil || bc.perBar != nil {
                             BarChangeCard(stats: bc, s: s)
                         }
                         if !s.activeAlarms.isEmpty {
@@ -49,9 +59,20 @@ struct StatusView: View {
                 }
                 .padding(16)
             }
+            .coordinateSpace(name: "statusScroll")
+            .onPreferenceChange(HeaderBottomKey.self) { bottom in
+                let hide = bottom < 12
+                if hide != pinned { withAnimation(.easeOut(duration: 0.18)) { pinned = hide } }
+            }
+            .overlay(alignment: .top) {
+                if pinned, let s = store.status {
+                    PinnedStatusBar(s: s)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .background(Color(.systemGroupedBackground))
             .refreshable { await store.refresh() }
-            .navigationTitle(store.status?.machineName ?? "Machine")
+            .toolbar(.hidden, for: .navigationBar)   // the title is part of the page; the status bar pins instead
         }
         // the camera only streams while this screen is showing and the app is in the foreground
         // folding the camera away stops the video too (the PC only streams while someone is watching)
@@ -71,6 +92,58 @@ struct StatusView: View {
 
 /// Operator messages from the CNC (e.g. "work count end in 1 hour") - shown as information, not alarms.
 /// "CAMERA ⌄" - tap to fold the video (and its controls) away; remembered.
+private struct HeaderBottomKey: PreferenceKey {
+    static let defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = min(value, nextValue()) }
+}
+
+/// Slim version of the status header, pinned to the top of the screen once the big one has scrolled away.
+struct PinnedStatusBar: View {
+    let s: MachineStatus
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: s.state.symbol)
+                .font(.system(size: 22, weight: .semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(s.headline.uppercased())
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                    if s.isOverProducing { OverrunBadge(size: 10) }
+                }
+                Group {
+                    if let since = s.stateSinceDate {
+                        Text((s.stateDetail.map { $0 + " · " } ?? "")) + Text(since, style: .relative)
+                    } else {
+                        Text(s.stateDetail ?? "")
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .opacity(0.9)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let p = s.parts {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(s.partsRequired.map { "\(p)/\($0)" } ?? "\(p)")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    if let left = s.remaining, left > 0 {
+                        Text("\(left) to go").font(.caption2.weight(.semibold)).opacity(0.85)
+                    }
+                }
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background { s.headlineColor.ignoresSafeArea(edges: .top) }
+        .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
+    }
+}
+
 struct CameraHeader: View {
     @Binding var collapsed: Bool
 
@@ -246,6 +319,22 @@ struct BarChangeCard: View {
     let stats: MachineStatus.BarChangeStats
     let s: MachineStatus
 
+    /// "~3 more bars needed", "Finishes on this bar", or "Learning parts per bar…"
+    private func barsNeeded(_ pb: MachineStatus.PerBar) -> String? {
+        let prog = pb.program ?? "This program"
+        guard let avg = pb.avg else { return "\(prog): learning parts per bar – shown after its first full bar" }
+        if pb.partsLeft != nil {
+            if pb.moreBars == 0 { return "\(prog): finishes on this bar" }
+            if let more = pb.moreBars {
+                var t = "\(prog): ~\(more) more bar\(more == 1 ? "" : "s") needed"
+                if let on = pb.leftOnBar, on > 0 { t += " (+ ~\(on) on this one)" }
+                return t
+            }
+            if let total = pb.barsTotal { return "\(prog): ~\(total) bar\(total == 1 ? "" : "s") for the \(pb.partsLeft ?? 0) left" }
+        }
+        return "\(prog): average of \(pb.bars ?? 0) bar\((pb.bars ?? 0) == 1 ? "" : "s") (~\(Int(avg.rounded())) parts)"
+    }
+
     private func stat(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption2).foregroundStyle(.secondary)
@@ -260,6 +349,12 @@ struct BarChangeCard: View {
                 stat("Today", "\(stats.today ?? 0)")
                 stat("Average", Fmt.span(stats.avgTodayS ?? stats.avgWeekS))
                 stat("Last", Fmt.span(stats.lastS))
+                stat("Parts/bar", stats.perBar?.avg.map { "~\(Int($0.rounded()))" } ?? "—")
+            }
+            if let pb = stats.perBar, let line = barsNeeded(pb) {
+                Label(line, systemImage: "cylinder.split.1x2")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(pb.avg == nil ? Color.secondary : Color.primary)
             }
             if let last = s.date(stats.lastAt) {
                 Text("Last finished \(last.formatted(date: .omitted, time: .shortened))"
