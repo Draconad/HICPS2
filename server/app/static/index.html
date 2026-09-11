@@ -61,6 +61,9 @@
   .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
   @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
+  .navbtn { font-size: 13px; font-weight: 700; color: var(--ink); background: #1f1f1f; border: 1px solid var(--line);
+            border-radius: 999px; padding: 7px 14px; text-decoration: none; white-space: nowrap; }
+  .navbtn:hover { border-color: var(--accent); }
   .labrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .namebtn { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: none; color: var(--muted);
              background: #1f1f1f; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
@@ -147,6 +150,7 @@
       <h1 id="name">Hanwha Monitor</h1>
       <div class="sub" id="seen">Loading…</div>
     </div>
+    <a class="navbtn" id="proglink" href="programs">&#9776; Program info</a>
   </header>
   <div class="top">
   <section class="status s-off" id="status" aria-live="polite">
@@ -235,7 +239,7 @@ const rel = s => { s = Math.max(0, Math.floor(s)); const d = Math.floor(s / 8640
   if (d) return `${d} day${d > 1 ? "s" : ""}${h ? `, ${h} hr` : ""}`;
   if (h) return `${h} hr${m ? `, ${m} min` : ""}`;
   return m ? `${m} min` : `${s} sec`; };
-const t = ts => new Date(ts * 1000).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const t = ts => new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", second: "2-digit" });
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const $ = id => document.getElementById(id);
 
@@ -272,7 +276,7 @@ async function status() {
   const since = bar ? s.bar_change_since : s.state_since;
   // like the app: "Since 14:02 · 1 hr, 45 min" (the phone's clock, corrected for drift)
   const drift = Date.now() / 1000 - now;
-  $("stsince").innerHTML = since ? `Since ${new Date((since + drift) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+  $("stsince").innerHTML = since ? `Since ${new Date((since + drift) * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`
                                    + ` &middot; <b>${rel(now - since)}</b>` : "";
   document.body.style.setProperty("--st", getComputedStyle(st).getPropertyValue("--st"));
   document.title = `${label.toUpperCase()} · ${s.machine_name}`;
@@ -282,7 +286,7 @@ async function status() {
   const toGo = left == null ? "" : (left === 0 ? (s.parts > s.parts_required
       ? `<b style="color:var(--accent)">${s.parts - s.parts_required} over the required count</b>` : '<b style="color:var(--run)">Target reached</b>')
     : `<b style="color:var(--ink)">${left} to go</b>${s.eta_s ? ` &middot; ~${span(s.eta_s)}` : ""}`
-      + (s.finish_at ? `<br>&#127937; Done ~${new Date(s.finish_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""));
+      + (s.finish_at ? `<br>&#127937; Done ~${new Date(s.finish_at * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""));
   $("eta").innerHTML = [toGo,
     s.work_counter == null ? "" : (s.work_counter ? '<span style="color:var(--run);font-weight:600">&#9632; Stops at count</span>'
                                                   : '<span style="color:#ff9f0a;font-weight:600">&infin; Won\'t stop at count</span>')]
@@ -307,7 +311,8 @@ async function status() {
   $("bctoday").textContent = bc.today || 0;
   // parts per bar: learnt per program, so it's known as soon as a program that has run before is loaded
   $("ppb").textContent = pb && pb.avg ? "~" + Math.round(pb.avg) : "—";
-  $("ppbwrap").title = pb && pb.avg ? `${pb.label || pb.program}: average of the last ${pb.bars} bar${pb.bars === 1 ? "" : "s"}` : "";
+  $("ppbwrap").title = pb && pb.avg ? (pb.source === "manual" ? `${pb.label || pb.program}: set in Program info`
+                                      : `${pb.label || pb.program}: average of the last ${pb.bars} bar${pb.bars === 1 ? "" : "s"}`) : "";
   let need = "";
   if (pb && !pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)}: learning parts per bar - shown after its first full bar</span>`;
   else if (pb && pb.parts_left) {
@@ -315,10 +320,11 @@ async function status() {
     else if (pb.more_bars != null) need = `${esc(pb.label || pb.program)}: ~${pb.more_bars} more bar${pb.more_bars === 1 ? "" : "s"} needed`
                                          + (pb.left_on_bar > 0 ? ` <span class="muted">(+ ~${pb.left_on_bar} parts left on this one)</span>` : "");
     else if (pb.bars_total != null) need = `${esc(pb.label || pb.program)}: ~${pb.bars_total} bar${pb.bars_total === 1 ? "" : "s"} for the ${pb.parts_left} parts left`;
-  } else if (pb && pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)} &middot; average of ${pb.bars} bar${pb.bars === 1 ? "" : "s"}</span>`;
+  } else if (pb && pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)} &middot; ${pb.source === "manual" ? "parts per bar set in Program info"
+                                   : `average of ${pb.bars} bar${pb.bars === 1 ? "" : "s"}`}</span>`;
   $("bcneed").innerHTML = need;
   $("bcsub").innerHTML = [bc.avg_today_s || bc.avg_week_s ? `Average ${span(bc.avg_today_s || bc.avg_week_s)}` : "",
-    bc.last_s ? `Last ${span(bc.last_s)}${bc.last_at ? " at " + new Date(bc.last_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}` : "",
+    bc.last_s ? `Last ${span(bc.last_s)}${bc.last_at ? " at " + new Date(bc.last_at * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : ""}` : "",
     bc.avg_week_s && bc.avg_today_s ? `7-day average ${span(bc.avg_week_s)}` : ""].filter(Boolean).join("<br>");
   $("seen").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
   const cmp = (a, b) => { a = String(a).split(".").map(Number); b = String(b).split(".").map(Number);
@@ -328,6 +334,7 @@ async function status() {
 }
 // your own name for the running program: shown after the number (O3110 - EMS301), kept with its bar data
 let progNow = {};
+if (q) $("proglink").href = "programs" + q;
 $("progname").onclick = async () => {
   const p = progNow;
   if (!p.key) return;

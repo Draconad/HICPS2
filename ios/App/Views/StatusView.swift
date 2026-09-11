@@ -256,7 +256,7 @@ struct StateHeader: View {
                         .lineLimit(2)
                 }
                 if let since = s.stateSinceDate {
-                    (Text("Since \(since, style: .time) · ") + Text(since, style: .relative))
+                    (Text("Since \(Fmt.clock(since)) · ") + Text(since, style: .relative))
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.8))
                 }
@@ -315,7 +315,7 @@ struct PartsCard: View {
                     .foregroundStyle(Color.primary.opacity(0.85))
             }
             if let finish = s.finish, (s.remaining ?? 0) > 0 {
-                Label("Done ~" + finish.formatted(date: .omitted, time: .shortened), systemImage: "flag.checkered")
+                Label("Done ~" + Fmt.clock(finish), systemImage: "flag.checkered")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -373,7 +373,7 @@ struct BarChangeCard: View {
                     .foregroundStyle(pb.avg == nil ? Color.secondary : Color.primary)
             }
             if let last = s.date(stats.lastAt) {
-                Text("Last finished \(last.formatted(date: .omitted, time: .shortened))"
+                Text("Last finished \(Fmt.clock(last))"
                      + (stats.avgWeekS.map { " · 7-day average " + Fmt.span($0) } ?? ""))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -507,7 +507,7 @@ struct ActiveAlarmsCard: View {
                         }
                         Text(a.displayMessage).font(.subheadline)
                         let started = a.started.addingTimeInterval(offset)
-                        (Text(started, style: .time) + Text(" · for ") + Text(started, style: .relative))
+                        (Text(Fmt.clock(started)) + Text(" · for ") + Text(started, style: .relative))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

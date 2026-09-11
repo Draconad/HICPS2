@@ -149,7 +149,7 @@ struct CameraPanel: View {
                     ProgressView().controlSize(.mini).tint(.white)
                     Text("Starting live video…").font(.caption.weight(.semibold))
                 } else if let t = model.stillTime {
-                    Text("Last image \(t.formatted(date: .omitted, time: .standard))").font(.caption.weight(.semibold))
+                    Text("Last image \(Fmt.clock(t, seconds: true))").font(.caption.weight(.semibold))
                 }
             }
             .foregroundStyle(.white)

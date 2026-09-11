@@ -128,7 +128,7 @@ struct AlarmRow: View {
                         .foregroundStyle(a.isActive ? MachineStateKind.alarm.color : .primary)
                     if let p = a.pathName { PathTag(name: p) }
                     Spacer()
-                    Text(a.started, format: .dateTime.hour().minute().second())
+                    Text(Fmt.clock(a.started, seconds: true))
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -169,8 +169,8 @@ struct AlarmDetail: View {
                     row("Type", a.typeName ?? "—")
                     row("Path", a.pathName ?? "—")
                     if let axis = a.axis, axis > 0 { row("Axis", "\(axis)") }
-                    row("Started", a.started.formatted(date: .abbreviated, time: .standard))
-                    row("Cleared", a.cleared?.formatted(date: .abbreviated, time: .standard) ?? "Still active")
+                    row("Started", Fmt.dateTime(a.started))
+                    row("Cleared", a.cleared.map { Fmt.dateTime($0) } ?? "Still active")
                     row("Duration", Fmt.span(a.durationS))
                 }
             }

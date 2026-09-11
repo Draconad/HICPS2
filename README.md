@@ -157,6 +157,15 @@ The data is at `/api/bars`. To make a program start learning again, e.g. after c
 ### Program names
 Click **Name** on the Program card on the dashboard, or tap **Name** on it in the app, to give the running program your own name. It then shows as **O3110 - EMS301** on the dashboard, the app, the Live Activity and the parts-per-bar lines. The name is stored on the server against the program number, alongside its bar counts, so it comes back whenever that program is loaded. Clear the name to remove it. The list is at `/api/programs`.
 
+### Program info
+The **Program info** button at the top of the dashboard, or Settings > **Program info** in the app, lists every program with a name, notes or bars on record. The loaded one is shown first. Open a program to:
+- set its **name** (shown as O3110 - EMS301)
+- see the **learnt parts per bar**, or set your own figure to use instead
+- keep **notes**, e.g. bar size, material or setup
+- see its **recorded bars** and remove a bad one, or forget them all after changing the bar length
+
+You can also add a program before it has run, to set its name or parts per bar in advance. Everything is stored on the server against the program number.
+
 ### Dashboard on different screen sizes
 On a wide screen, the camera sits beside the status and figures, with the alarms full width underneath. On a narrower window or a phone, everything stacks in one column.
 

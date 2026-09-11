@@ -168,7 +168,7 @@ final class LiveActivityManager: ObservableObject {
             lastPushTime = Date()
             lastError = nil
             warnedRestart = false
-            lastAttempt = "started \(Date().formatted(date: .omitted, time: .shortened))"
+            lastAttempt = "started \(Fmt.clock(Date()))"
         } catch {
             lastAttempt = "failed"
             EventLog.shared.add("LA start FAILED: \(error)")

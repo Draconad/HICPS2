@@ -188,6 +188,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        ProgramListView()
+                    } label: {
+                        Label("Program info", systemImage: "list.bullet.rectangle")
+                    }
+                } header: {
+                    Text("Programs")
+                } footer: {
+                    Text("Names, parts per bar and notes for each program number.")
+                }
+
+                Section {
                     Button("Clear alarm history", role: .destructive) { confirmClear = true }
                 } header: {
                     Text("Data")
@@ -235,10 +247,10 @@ struct SettingsView: View {
         let k = BackgroundKeeper.shared
         var parts = ["silent audio \(k.isRunning ? (k.isPlaying ? "playing" : "PAUSED") : "off")"]
         if let t = store.lastBackgroundPoll {
-            parts.append("last locked poll \(t.formatted(date: .omitted, time: .standard))")
+            parts.append("last locked poll \(Fmt.clock(t, seconds: true))")
         }
         if k.stopCount > 0, let d = k.lastStopDate {
-            parts.append("stopped \(k.stopCount)x, last: \(k.lastStopReason) at \(d.formatted(date: .omitted, time: .shortened))")
+            parts.append("stopped \(k.stopCount)x, last: \(k.lastStopReason) at \(Fmt.clock(d))")
         }
         return parts.joined(separator: " · ")
     }

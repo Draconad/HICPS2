@@ -231,7 +231,7 @@ struct LockScreenView: View {
                 if stale || !s.reachable {
                     HStack(spacing: 4) {
                         Image(systemName: "wifi.exclamationmark")
-                        Text("No update since \(s.updated, style: .time)")
+                        Text("No update since \(Fmt.clock(s.updated))")
                     }
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.6))

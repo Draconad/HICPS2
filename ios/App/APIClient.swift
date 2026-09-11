@@ -204,6 +204,35 @@ struct APIClient {
         }
     }
 
+    // MARK: Program info
+
+    func programs() async throws -> ProgramList {
+        try await send(try request("/api/programs"), as: ProgramList.self)
+    }
+
+    func programDetail(_ key: String) async throws -> ProgramRecord {
+        try await send(try request("/api/programs/detail", query: [URLQueryItem(name: "program", value: key)]),
+                       as: ProgramRecord.self)
+    }
+
+    /// Saves name, manual parts per bar (nil = use the learnt figure) and notes for a program.
+    func saveProgram(_ key: String, name: String, ppbManual: Double?, notes: String) async throws {
+        struct R: Decodable { var ok: Bool; var error: String? }
+        let body: [String: Any] = ["program": key, "name": name, "notes": notes,
+                                   "ppb_manual": ppbManual.map { $0 as Any } ?? NSNull()]
+        let r = try await post("/api/programs", body, as: R.self)
+        if !r.ok { throw NSError(domain: "HiCPS", code: 1, userInfo: [NSLocalizedDescriptionKey: r.error ?? "Not saved"]) }
+    }
+
+    /// Leave one recorded bar out (a bad one), or pass a program to forget all of its bars.
+    func deleteBars(id: Int? = nil, program: String? = nil) async throws {
+        struct R: Decodable { var ok: Bool }
+        var q: [URLQueryItem] = []
+        if let id { q.append(URLQueryItem(name: "id", value: String(id))) }
+        if let program { q.append(URLQueryItem(name: "program", value: program)) }
+        _ = try await send(try request("/api/bars", query: q, method: "DELETE"), as: R.self)
+    }
+
     /// Your own name for a program (empty removes it). Stored on the server with the program's bar counts.
     func nameProgram(_ key: String, name: String) async throws {
         struct R: Decodable { var ok: Bool; var error: String? }

@@ -182,6 +182,37 @@ struct MachineStatus: Decodable, Equatable {
     }
 }
 
+/// Everything stored about a program (Settings > Program info)
+struct ProgramRecord: Decodable, Equatable, Identifiable {
+    var program: String
+    var name: String?
+    var label: String?
+    var notes: String?
+    var ppbManual: Double?          // parts per bar you typed in (used instead of the learnt one)
+    var ppbLearnt: Double?
+    var ppbLearntBars: Int?
+    var barsRecorded: Int?
+    var firstBarAt: Double?
+    var lastBarAt: Double?
+    var loaded: Bool?
+    var bars: [BarRecord]?          // detail only
+
+    var id: String { program }
+    var ppbInUse: Double? { ppbManual ?? ppbLearnt }
+
+    struct BarRecord: Decodable, Equatable, Identifiable {
+        var id: Int
+        var parts: Int
+        var startedAt: Double
+        var endedAt: Double
+    }
+}
+
+struct ProgramList: Decodable {
+    var programs: [ProgramRecord]
+    var loaded: String?
+}
+
 struct AlarmPage: Decodable {
     var alarms: [AlarmEvent]
     var nextBefore: Double?

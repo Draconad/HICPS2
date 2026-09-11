@@ -10,7 +10,9 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/states     state change log (?hours=24)
   PUT  /api/agent/update?version=X  (exe body, X-Signature header)   GET /api/agent/update   GET /api/agent/update/download
   GET  /api/barchanges   bar change history
-  GET  /api/programs   your program names       POST /api/programs {program: "O3110", name: "EMS301"}  (empty name = remove)
+  GET  /api/programs   program info list    GET /api/programs/detail?program=O3110   (+ its bars)
+  POST /api/programs {program, name?, ppb_manual?, notes?}   only the fields sent change
+  DELETE /api/bars?id=17 | ?program=O3110   forget one bar / all of a program's bars
   GET  /api/bars   parts per bar per program + recent bars      DELETE /api/bars?program=O1234   forget a program's bars
   GET  /api/messages   operator message history (?limit=100) - e.g. "work count end in 1 hour", not alarms
   GET  /api/health
@@ -107,6 +109,11 @@ def _connect() -> sqlite3.Connection:
     cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
     if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
         c.execute("ALTER TABLE alarms ADD COLUMN demo INTEGER")
+    pcols = {r["name"] for r in c.execute("PRAGMA table_info(programs)")}
+    if "ppb_manual" not in pcols:   # parts per bar typed in by you (overrides the learnt figure)
+        c.execute("ALTER TABLE programs ADD COLUMN ppb_manual REAL")
+    if "notes" not in pcols:
+        c.execute("ALTER TABLE programs ADD COLUMN notes TEXT")
     return c
 
 
@@ -310,7 +317,7 @@ def program_name(key: str | None) -> str | None:
     if not key:
         return None
     r = db.execute("SELECT name FROM programs WHERE program=?", (key,)).fetchone()
-    return r["name"] if r else None
+    return (r["name"] or None) if r else None
 
 
 def program_label(key: str | None) -> str | None:
@@ -356,18 +363,48 @@ def record_bar(snap: dict, now: float, demo: bool):
     log.info("Bar finished on %s: %d parts", key, made)
 
 
-def parts_per_bar(key: str | None, demo: bool) -> dict | None:
-    if not key:
-        return None
+def learnt_parts_per_bar(key: str, demo: bool) -> tuple[float | None, int]:
     vals = [r["parts"] for r in db.execute(
         "SELECT parts FROM bars WHERE program=? AND COALESCE(demo,0)=? ORDER BY ended_at DESC LIMIT ?",
         (key, int(demo), BAR_HISTORY * 2)).fetchall()]
     if not vals:
-        return None
+        return None, 0
     med = sorted(vals)[len(vals) // 2]
     # leave out odd ones (a missed bar change counts double, a short remnant bar counts low)
     good = [v for v in vals if 0.6 * med <= v <= 1.4 * med][:BAR_HISTORY] or vals[:BAR_HISTORY]
-    return {"program": key, "label": program_label(key), "avg": round(sum(good) / len(good), 1), "bars": len(good)}
+    return round(sum(good) / len(good), 1), len(good)
+
+
+def parts_per_bar(key: str | None, demo: bool) -> dict | None:
+    """Parts per bar for a program: the figure typed in under Program info if there is one, else the learnt one."""
+    if not key:
+        return None
+    learnt, n = learnt_parts_per_bar(key, demo)
+    r = db.execute("SELECT ppb_manual FROM programs WHERE program=?", (key,)).fetchone()
+    manual = r["ppb_manual"] if r and r["ppb_manual"] else None
+    if manual is None and learnt is None:
+        return None
+    return {"program": key, "label": program_label(key), "avg": manual or learnt, "bars": n,
+            "source": "manual" if manual else "learnt", "learnt_avg": learnt}
+
+
+def program_row(key: str, current: str | None = None) -> dict:
+    """Everything stored about one program, for the Program info screens."""
+    r = db.execute("SELECT * FROM programs WHERE program=?", (key,)).fetchone()
+    learnt, n = learnt_parts_per_bar(key, False)
+    agg = db.execute("SELECT COUNT(*) n, MAX(ended_at) last, MIN(started_at) first FROM bars "
+                     "WHERE program=? AND COALESCE(demo,0)=0", (key,)).fetchone()
+    return {"program": key, "name": (r["name"] or None) if r else None, "label": program_label(key),
+            "notes": (r["notes"] or None) if r else None, "ppb_manual": r["ppb_manual"] if r else None,
+            "ppb_learnt": learnt, "ppb_learnt_bars": n, "bars_recorded": agg["n"] or 0,
+            "first_bar_at": agg["first"], "last_bar_at": agg["last"], "loaded": key == current}
+
+
+def valid_program_key(raw) -> str | None:
+    key = str(raw or "").strip().upper()
+    if re.fullmatch(r"\d{1,5}", key):
+        key = f"O{int(key):04d}"
+    return key if re.fullmatch(r"O\d{4,5}|[A-Z0-9_.\-]{1,32}", key) else None
 
 
 def bar_forecast(now: float) -> dict | None:
@@ -746,11 +783,12 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
         path = url.path.rstrip("/") or "/"
         try:
-            if method == "GET" and path in ("/", "/index.html"):
+            if method == "GET" and path in ("/", "/index.html", "/programs"):
                 s = self._session()
                 if not s or s["must_change"]:
                     return self._redirect("login")
-                return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+                page = "programs.html" if path == "/programs" else "index.html"
+                return self._send(200, (STATIC / page).read_bytes(), "text/html; charset=utf-8")
             if self._auth_route(method, path):
                 return
             if method == "GET" and path == "/hls.min.js":   # video player library (bundled into the image)
@@ -790,29 +828,59 @@ class Handler(BaseHTTPRequestHandler):
                     rows = db.execute("SELECT * FROM bar_changes ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
                 return self._json({"bar_changes": [dict(r) for r in rows]})
             if method == "GET" and path == "/api/programs":
+                # every program with a name, notes or bars on record (plus the loaded one)
                 with _lock:
-                    rows = db.execute("SELECT p.program, p.name, p.updated, (SELECT COUNT(*) FROM bars b WHERE "
-                                      "b.program=p.program) bars FROM programs p ORDER BY p.program").fetchall()
-                return self._json({"programs": [dict(r) for r in rows]})
+                    current = program_key(latest.get("program"))
+                    keys = {r["program"] for r in db.execute("SELECT program FROM programs")}
+                    keys |= {r["program"] for r in db.execute("SELECT DISTINCT program FROM bars WHERE COALESCE(demo,0)=0")}
+                    if current:
+                        keys.add(current)
+                    rows = [program_row(k, current) for k in keys]
+                rows.sort(key=lambda r: (not r["loaded"], -(r["last_bar_at"] or 0), r["program"]))
+                return self._json({"programs": rows, "loaded": current})
+            if method == "GET" and path == "/api/programs/detail":
+                key = valid_program_key((qs.get("program") or [""])[0])
+                if not key:
+                    return self._json({"ok": False, "error": "program= is required"}, 400)
+                with _lock:
+                    info = program_row(key, program_key(latest.get("program")))
+                    info["bars"] = [dict(r) for r in db.execute(
+                        "SELECT id, parts, started_at, ended_at FROM bars WHERE program=? AND COALESCE(demo,0)=0 "
+                        "ORDER BY ended_at DESC LIMIT 200", (key,))]
+                return self._json(info)
             if method in ("POST", "PUT") and path == "/api/programs":
-                # name a program: {"program": "O3110", "name": "EMS301"} - an empty name removes it
+                # {"program": "O3110", "name": "EMS301", "ppb_manual": 43, "notes": "..."} - only the fields sent change;
+                # an empty name / notes or a null ppb_manual clears that field
                 b = self._body()
-                key = str(b.get("program") or "").strip().upper()
-                if re.fullmatch(r"\d{1,5}", key):
-                    key = f"O{int(key):04d}"
-                name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()[:40]
-                if not re.fullmatch(r"O\d{4,5}|[A-Z0-9_.\-]{1,32}", key):
+                key = valid_program_key(b.get("program"))
+                if not key:
                     return self._json({"ok": False, "error": "program must look like O3110"}, 400)
                 with _lock:
-                    if name:
-                        db.execute("INSERT INTO programs(program,name,updated) VALUES(?,?,?) ON CONFLICT(program) "
-                                   "DO UPDATE SET name=excluded.name, updated=excluded.updated", (key, name, time.time()))
+                    r = db.execute("SELECT * FROM programs WHERE program=?", (key,)).fetchone()
+                    name = (r["name"] or "") if r else ""
+                    ppb = r["ppb_manual"] if r else None
+                    notes = (r["notes"] or "") if r else ""
+                    if "name" in b:
+                        name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()[:40]
+                    if "notes" in b:
+                        notes = str(b.get("notes") or "").strip()[:500]
+                    if "ppb_manual" in b:
+                        try:
+                            ppb = float(b["ppb_manual"]) if b["ppb_manual"] not in (None, "") else None
+                        except (TypeError, ValueError):
+                            return self._json({"ok": False, "error": "parts per bar must be a number"}, 400)
+                        if ppb is not None and not 1 <= ppb <= 20000:
+                            return self._json({"ok": False, "error": "parts per bar must be between 1 and 20000"}, 400)
+                    if name or ppb or notes:
+                        db.execute("INSERT INTO programs(program,name,ppb_manual,notes,updated) VALUES(?,?,?,?,?) "
+                                   "ON CONFLICT(program) DO UPDATE SET name=excluded.name, ppb_manual=excluded.ppb_manual, "
+                                   "notes=excluded.notes, updated=excluded.updated", (key, name, ppb, notes, time.time()))
                     else:
                         db.execute("DELETE FROM programs WHERE program=?", (key,))
-                    label = program_label(key)
-                log.info("Program %s named %r", key, name)
+                    info = program_row(key, program_key(latest.get("program")))
+                log.info("Program %s: name=%r parts/bar=%s", key, name, ppb)
                 push.poke()
-                return self._json({"ok": True, "program": key, "name": name or None, "label": label})
+                return self._json({"ok": True, **info})
             if method == "GET" and path == "/api/bars":
                 # parts per bar, per program (what the forecast is based on), plus the recent bars
                 with _lock:
@@ -824,12 +892,18 @@ class Handler(BaseHTTPRequestHandler):
                     recent = [dict(r) for r in db.execute("SELECT * FROM bars ORDER BY ended_at DESC LIMIT 100")]
                 return self._json({"programs": out, "bars": recent})
             if method == "DELETE" and path == "/api/bars":
-                # forget a program's bars (e.g. after changing bar length or the part): ?program=O1234
-                prog = (qs.get("program") or [""])[0].strip()
-                if not prog:
-                    return self._json({"ok": False, "error": "program= is required"}, 400)
+                # forget one bar (?id=17 - e.g. a bad one) or all of a program's bars (?program=O1234 - e.g. after
+                # changing the bar length or the part)
+                bar_id = (qs.get("id") or [""])[0].strip()
+                prog = valid_program_key((qs.get("program") or [""])[0])
+                if not bar_id.isdigit() and not prog:
+                    return self._json({"ok": False, "error": "id= or program= is required"}, 400)
                 with _lock:
-                    n = db.execute("DELETE FROM bars WHERE program=?", (prog,)).rowcount
+                    if bar_id.isdigit():
+                        n = db.execute("DELETE FROM bars WHERE id=?", (int(bar_id),)).rowcount
+                    else:
+                        n = db.execute("DELETE FROM bars WHERE program=?", (prog,)).rowcount
+                push.poke()
                 return self._json({"ok": True, "deleted": n})
             if method == "GET" and path == "/api/messages":
                 limit = max(1, min(500, int((qs.get("limit") or ["100"])[0])))

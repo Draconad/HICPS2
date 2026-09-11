@@ -104,7 +104,7 @@ struct MachineActivityAttributes: ActivityAttributes {
             if left == 0 { return "Target reached" }
             var t = "\(left) to go"
             if let f = finishEpoch, state.isRunning {
-                t += " · done ~" + Date(timeIntervalSince1970: f).formatted(date: .omitted, time: .shortened)
+                t += " · done ~" + Fmt.clock(Date(timeIntervalSince1970: f))
             } else if let c = lastCycle, c > 0 {
                 t += " · ~" + Fmt.span(Double(left) * c)
             }
@@ -139,6 +139,21 @@ struct OverrunBadge: View {
 }
 
 enum Fmt {
+    private static func formatter(_ format: String) -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")   // 24-hour clock everywhere, whatever the phone's setting
+        f.dateFormat = format
+        return f
+    }
+    private static let hm = formatter("HH:mm")
+    private static let hms = formatter("HH:mm:ss")
+    private static let dhms = formatter("d MMM yyyy, HH:mm:ss")
+
+    /// 24-hour clock: "14:05", or "14:05:09" with seconds
+    static func clock(_ d: Date, seconds: Bool = false) -> String { (seconds ? hms : hm).string(from: d) }
+    /// "11 Sep 2026, 14:05:09"
+    static func dateTime(_ d: Date) -> String { dhms.string(from: d) }
+
     /// 83 -> "1:23", 3723 -> "1:02:03"
     static func duration(_ seconds: Double?) -> String {
         guard let seconds, seconds.isFinite, seconds >= 0 else { return "—" }
