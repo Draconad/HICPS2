@@ -24,9 +24,7 @@ struct StatusView: View {
                             CameraPanel(model: camera, player: camera.player, features: s.camera) {
                                 cameraFullScreen = true
                             }
-                            if s.camera?.ptz == true, let presets = s.camera?.presets, !presets.isEmpty {
-                                PresetBar(model: camera, presets: presets)
-                            }
+                            CameraControls(model: camera, features: s.camera)
                         }
                         HStack(spacing: 14) {
                             PartsCard(s: s)

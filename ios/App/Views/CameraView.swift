@@ -133,9 +133,6 @@ struct CameraPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: fullScreen ? 0 : 16, style: .continuous))
         .overlay(alignment: .topLeading) { badge.padding(10) }
         .overlay(alignment: .topTrailing) { topButtons.padding(8) }
-        .overlay(alignment: .bottomTrailing) {
-            if features?.ptz == true && hasPicture { PTZPad(model: model).padding(8) }
-        }
         .overlay(alignment: .bottomLeading) { footnote.padding(10) }
     }
 
@@ -243,6 +240,7 @@ struct CameraPanel: View {
 /// Pan/tilt arrows. Each tap nudges the camera a little; the picture is a few seconds behind, so moves show late.
 struct PTZPad: View {
     @ObservedObject var model: CameraModel
+    var size: CGFloat = 32
     private let step = 0.1
 
     var body: some View {
@@ -263,9 +261,9 @@ struct PTZPad: View {
     private func arrow(_ symbol: String, _ x: Double, _ y: Double) -> some View {
         Button { model.ptz(x: x, y: y) } label: {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: size * 0.47, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
+                .frame(width: size, height: size)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -274,27 +272,77 @@ struct PTZPad: View {
     }
 }
 
-/// The camera's saved positions (from the Tapo app) as a row of buttons under the video.
-struct PresetBar: View {
+/// Pan/tilt pad and the Tapo app's saved positions, in a card under the video that opens and closes
+/// (remembered), so nothing sits on top of the picture.
+struct CameraControls: View {
     @ObservedObject var model: CameraModel
-    let presets: [MachineStatus.Preset]
+    var features: MachineStatus.CameraInfo?
+    @AppStorage("cameraControlsOpen") private var open = false
+
+    private var presets: [MachineStatus.Preset] { features?.presets ?? [] }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                Image(systemName: "scope").foregroundStyle(.secondary)
-                ForEach(presets, id: \.self) { p in
-                    Button { model.goTo(p) } label: {
-                        Text(p.name)
+        if features?.ptz == true {
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { open.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                            .foregroundStyle(.secondary)
+                        Text("Camera controls")
                             .font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(Color(.tertiarySystemFill), in: Capsule())
+                        if !open && !presets.isEmpty {
+                            Text("\(presets.count) position\(presets.count == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if model.ptzBusy {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(open ? 180 : 0))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(model.ptzBusy)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(open ? "Hide camera controls" : "Show camera controls")
+
+                if open {
+                    HStack(alignment: .center, spacing: 16) {
+                        PTZPad(model: model, size: 40)
+                        if presets.isEmpty {
+                            Text("Positions saved in the Tapo app (pan/tilt › Preset) appear here.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 8)], alignment: .leading, spacing: 8) {
+                                ForEach(presets, id: \.self) { p in
+                                    Button { model.goTo(p) } label: {
+                                        Text(p.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.horizontal, 10).padding(.vertical, 8)
+                                            .background(Color(.tertiarySystemFill), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(model.ptzBusy)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 2)
+            .padding(12)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 }
@@ -309,9 +357,8 @@ struct CameraFullScreen: View {
         VStack(spacing: 8) {
             CameraPanel(model: model, player: model.player, features: features, fullScreen: true) { dismiss() }
                 .ignoresSafeArea(edges: .horizontal)
-            if features?.ptz == true, let presets = features?.presets, !presets.isEmpty {
-                PresetBar(model: model, presets: presets).padding(.horizontal, 12).padding(.bottom, 8)
-            }
+            CameraControls(model: model, features: features)
+                .padding(.horizontal, 12).padding(.bottom, 8)
         }
         .background(Color.black.ignoresSafeArea())
     }
