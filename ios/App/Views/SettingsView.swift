@@ -73,14 +73,22 @@ struct SettingsView: View {
                         Text(live.systemEnabled ? "Yes" : "No")
                             .foregroundStyle(live.systemEnabled ? Color.secondary : Color.orange)
                     }
-                    if liveActivity && !live.isActive {
+                    if live.isActive {
+                        Button("Restart Live Activity") {
+                            Task { await live.restart(with: store.status, machineName: store.machineName) }
+                        }
+                    } else {
                         Button("Start Live Activity now") {
-                            live.start(with: store.status, machineName: store.machineName)
+                            if !liveActivity { liveActivity = true }   // onChange starts it
+                            else { live.start(with: store.status, machineName: store.machineName) }
                         }
                     }
                     if let err = live.lastError {
                         Text(err).font(.footnote).foregroundStyle(.orange)
                     }
+                    Text(live.diagnostics)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
                 } header: {
                     Text("Live Activity")
                 } footer: {
@@ -134,7 +142,7 @@ struct SettingsView: View {
                 }
 
                 Section("About") {
-                    LabeledContent("App version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    LabeledContent("App version", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
                     if let s = store.status {
                         LabeledContent("Machine", value: s.machineName)
                         LabeledContent("Monitor PC", value: s.agentOnline ? "Online" : "Offline")

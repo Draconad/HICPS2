@@ -83,13 +83,32 @@ final class LiveActivityManager: ObservableObject {
             updated: Date())
     }
 
+    /// One-line summary shown in Settings to help work out why nothing appears.
+    var diagnostics: String {
+        let idiom = UIDevice.current.userInterfaceIdiom == .pad ? "iPad app"
+            : (UIDevice.current.model.hasPrefix("iPad") ? "iPhone app on iPad" : "iPhone")
+        let running = Activity<Attrs>.activities.map { "\($0.activityState)" }.joined(separator: ",")
+        return "\(idiom) · iOS \(UIDevice.current.systemVersion) · enabled \(systemEnabled) · "
+            + "activities [\(running)] · last start: \(lastAttempt)"
+    }
+    @Published private(set) var lastAttempt = "never"
+
+    func restart(with status: MachineStatus?, machineName: String) async {
+        await stop()
+        start(with: status, machineName: machineName)
+    }
+
     func start(with status: MachineStatus?, machineName: String) {
-        guard AppSettings.liveActivity else { return }
+        guard AppSettings.liveActivity else {
+            lastAttempt = "skipped (switched off in this app)"
+            return
+        }
         guard systemEnabled else {
+            lastAttempt = "blocked by iOS"
             lastError = "iOS isn't allowing Live Activities for this app. Check Settings › XE35 Monitor › Live Activities (and Settings › Face ID & Passcode › Live Activities on the Lock Screen)."
             return
         }
-        guard activity == nil else { return }
+        guard activity == nil else { lastAttempt = "already running"; return }
         let state = Self.content(from: status, reachable: status != nil, previous: nil)
         do {
             let a = try Activity.request(attributes: Attrs(machineName: machineName),
@@ -100,8 +119,10 @@ final class LiveActivityManager: ObservableObject {
             lastPushTime = Date()
             lastError = nil
             warnedRestart = false
+            lastAttempt = "started \(Date().formatted(date: .omitted, time: .shortened))"
         } catch {
-            lastError = "Couldn't start Live Activity: \(error.localizedDescription)"
+            lastAttempt = "failed"
+            lastError = "Couldn't start Live Activity: \(error.localizedDescription) [\(String(describing: error))]"
         }
     }
 
