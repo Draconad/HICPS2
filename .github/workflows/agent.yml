@@ -18,6 +18,8 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      HAS_UPDATE_KEY: ${{ secrets.UPDATE_SIGNING_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +38,15 @@ jobs:
       - name: Build exe
         working-directory: agent
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name HanwhaMonitor --icon icon.ico --hidden-import pystray._win32 run.py
+
+      # Signature for automatic updates (the PC app refuses unsigned updates). Skipped until the secret is set -
+      # push-to-github.bat sets it from update-signing-key.txt.
+      - name: Sign for automatic updates
+        if: env.HAS_UPDATE_KEY == 'true'
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        working-directory: agent
+        run: python sign_update.py dist/HanwhaMonitor.exe
 
       # ffmpeg reads the camera's RTSP stream. A separate 64-bit program, so it works even though the app is
       # 32-bit (on 64-bit Windows). Not fatal if the download fails - the app works without the camera.
@@ -62,6 +73,7 @@ jobs:
           name: HanwhaMonitor-exe
           path: |
             agent/dist/HanwhaMonitor.exe
+            agent/dist/HanwhaMonitor.exe.sig
             agent/dist/ffmpeg.exe
           retention-days: 7
           if-no-files-found: warn

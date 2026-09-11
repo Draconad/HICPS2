@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct ProgramInfo: Decodable, Equatable {
     var number: Int?
@@ -76,6 +77,26 @@ struct MachineStatus: Decodable, Equatable {
     var controls: ControlsInfo?
     /// Operator messages on the CNC screen (e.g. "work count end in 1 hour") - information, not alarms
     var messages: [OpMessage]?
+    var finishAt: Double?               // estimated time the required count is reached (server clock)
+    var jobComplete: JobComplete?       // the last time the count reached the required count
+    var barChanges: BarChangeStats?
+    var runningEndedAt: Double?
+    var overProducing: Bool?
+
+    struct JobComplete: Decodable, Equatable {
+        var at: Double
+        var parts: Int?
+        var required: Int?
+    }
+
+    struct BarChangeStats: Decodable, Equatable {
+        var today: Int?
+        var avgTodayS: Double?
+        var avgWeekS: Double?
+        var lastS: Double?
+        var lastAt: Double?
+        var alertAfterS: Double?
+    }
 
     struct OpMessage: Decodable, Equatable, Identifiable {
         var id: Int
@@ -109,7 +130,8 @@ struct MachineStatus: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case serverTime, machineName, state, stateDetail, stateSince, agentOnline, agentLastSeen, machineConnected,
              demo, parts, partsRequired, partsTotal, lastCycleS, cycleTimerS, cycleStartedAt, etaS, program, paths,
-             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter, camera, controls, messages
+             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter, camera, controls, messages,
+             finishAt, jobComplete, barChanges, runningEndedAt, overProducing
     }
 
     func date(_ serverEpoch: Double?) -> Date? {
@@ -126,6 +148,19 @@ struct MachineStatus: Decodable, Equatable {
     var remaining: Int? {
         guard let p = parts, let r = partsRequired, r > 0 else { return nil }
         return max(0, r - p)
+    }
+    var isOverProducing: Bool { overProducing == true && state == .running }
+    var headline: String { isOverProducing ? "Running – Over producing" : state.label }
+    var headlineColor: Color { isOverProducing ? MachineStateKind.overProducingColor : state.color }
+
+    /// When the required count will be reached at the current cycle time (phone clock), while running
+    var finish: Date? { date(finishAt) }
+
+    /// For "only while running": running now, or stopped less than `grace` seconds ago
+    func inRunningWindow(grace: Double = 15) -> Bool {
+        if state.isRunning { return true }
+        guard let ended = runningEndedAt else { return false }
+        return serverTime - ended <= grace
     }
 }
 

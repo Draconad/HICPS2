@@ -41,6 +41,21 @@ if errorlevel 1 goto failed
 :repo_exists
 >github-repo.txt echo %REPO%
 
+REM ---- update-signing key: stored as a GitHub secret, then deleted here -----
+REM (GitHub Actions signs each PC-app build with it; the PC app only installs
+REM  signed updates. Done before the push so this push's build gets signed.)
+if not exist "update-signing-key.txt" goto key_done
+echo Storing the update-signing key as a GitHub secret...
+gh secret set UPDATE_SIGNING_KEY --repo "%REPO%" < "update-signing-key.txt"
+if errorlevel 1 goto key_failed
+del "update-signing-key.txt"
+echo   Stored, and the local copy deleted.
+goto key_done
+:key_failed
+echo   Couldn't store it - kept update-signing-key.txt so the next run can try again.
+echo   (Builds still work; they just aren't signed for automatic updates yet.)
+:key_done
+
 REM ---- local git ----------------------------------------------------------
 if exist ".git" goto have_git
 echo Setting up git in this folder...

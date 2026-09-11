@@ -86,30 +86,43 @@ final class MachineStore: ObservableObject {
         defer { previousState = s.state }
         // With Apple push set up, the server sends these (even when the app is closed) - don't double up.
         if PushManager.shared.serverHandlesPush { return }
+        // "Only while running": everything below still gets marked as seen, so nothing pops up later
+        let allowed = !AppSettings.onlyWhileRunning || s.inRunningWindow()
+        func notify(_ id: String, _ title: String, _ body: String) {
+            if allowed { NotificationManager.shared.post(id: id, title: title, body: body) }
+        }
+        let now = s.serverTime
         if AppSettings.notifyAlarms {
             for a in s.activeAlarms where NotificationManager.shared.markAlarmNotified(a.id) {
                 // Don't spam about alarms that were already active long before we looked
-                guard Date().timeIntervalSince1970 - (a.startedAt + s.clockOffset) < 15 * 60 else { continue }
-                NotificationManager.shared.post(
-                    id: "alarm-\(a.id)",
-                    title: "⚠️ \(s.machineName) — \(a.displayCode)",
-                    body: [a.displayMessage, a.pathName.map { "\($0) path" }].compactMap { $0 }.joined(separator: " · "))
+                guard now - a.startedAt < 15 * 60 else { continue }
+                notify("alarm-\(a.id)", "⚠️ \(s.machineName) — \(a.displayCode)",
+                       [a.displayMessage, a.pathName.map { "\($0) path" }].compactMap { $0 }.joined(separator: " · "))
             }
         }
         if AppSettings.notifyMessages {
             for m in s.messages ?? [] where NotificationManager.shared.markAlarmNotified("msg-\(m.id)") {
-                guard Date().timeIntervalSince1970 - (m.startedAt + s.clockOffset) < 15 * 60 else { continue }
-                NotificationManager.shared.post(id: "msg-\(m.id)", title: "💬 \(s.machineName)", body: m.text)
+                guard now - m.startedAt < 15 * 60 else { continue }
+                notify("msg-\(m.id)", "💬 \(s.machineName)", m.text)
             }
+        }
+        if AppSettings.notifyComplete, let jc = s.jobComplete, now - jc.at < 600,
+           NotificationManager.shared.markAlarmNotified("job-\(Int(jc.at))") {
+            notify("job-\(Int(jc.at))", "✅ \(s.machineName): job complete",
+                   "\(jc.parts.map { String($0) } ?? "—")/\(jc.required.map { String($0) } ?? "—") parts")
+        }
+        if AppSettings.notifyBarChange, s.state == .barChange || s.barChange == true, let since = s.barChangeSince,
+           now - since > (s.barChanges?.alertAfterS ?? 180),
+           NotificationManager.shared.markAlarmNotified("bar-\(Int(since))") {
+            let d = Int(now - since)
+            notify("bar-\(Int(since))", "⏳ \(s.machineName): bar change taking long", "\(d / 60) min \(d % 60) s so far")
         }
         guard let prev = previousState, prev != s.state else { return }
         if AppSettings.notifyStopped, prev.isRunning, s.state == .standby {
-            NotificationManager.shared.post(id: "stopped-\(Int(s.serverTime))", title: "\(s.machineName) stopped",
-                                            body: s.stateDetail ?? "Machine is in standby")
+            notify("stopped-\(Int(s.serverTime))", "\(s.machineName) stopped", s.stateDetail ?? "Machine is in standby")
         }
         if AppSettings.notifyOff, s.state == .off, prev != .off {
-            NotificationManager.shared.post(id: "off-\(Int(s.serverTime))", title: "\(s.machineName) is off",
-                                            body: s.stateDetail ?? "No data from the machine")
+            notify("off-\(Int(s.serverTime))", "\(s.machineName) is off", s.stateDetail ?? "No data from the machine")
         }
     }
 

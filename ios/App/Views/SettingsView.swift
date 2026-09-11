@@ -19,6 +19,9 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.notifyStopped) private var notifyStopped = false
     @AppStorage(SettingsKey.notifyOff) private var notifyOff = false
     @AppStorage(SettingsKey.notifyMessages) private var notifyMessages = true
+    @AppStorage(SettingsKey.notifyComplete) private var notifyComplete = true
+    @AppStorage(SettingsKey.notifyBarChange) private var notifyBarChange = true
+    @AppStorage(SettingsKey.onlyWhileRunning) private var onlyWhileRunning = false
 
     @State private var testResult: (ok: Bool, text: String)?
     @State private var testing = false
@@ -158,8 +161,11 @@ struct SettingsView: View {
                 Section {
                     Toggle("New alarms", isOn: $notifyAlarms)
                     Toggle("Machine messages (e.g. 1 hour to count)", isOn: $notifyMessages)
+                    Toggle("Job complete (required count reached)", isOn: $notifyComplete)
+                    Toggle("Bar change taking too long", isOn: $notifyBarChange)
                     Toggle("Machine stopped (running → standby)", isOn: $notifyStopped)
                     Toggle("Machine switched off / offline", isOn: $notifyOff)
+                    Toggle("Only while the machine is running", isOn: $onlyWhileRunning)
                     if notifStatus == .denied {
                         Button("Notifications are blocked — open iOS Settings") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -175,6 +181,10 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Notifications")
+                } footer: {
+                    Text(onlyWhileRunning
+                         ? "Notifications and Live Activity updates are only sent while the machine is running, and for 15 seconds after it stops – so the alarm that stopped it still comes through. Nothing arrives while it's sat idle."
+                         : "Turn on \u{201C}Only while the machine is running\u{201D} to stay quiet while the machine is idle (e.g. overnight).")
                 }
 
                 Section {
@@ -209,6 +219,9 @@ struct SettingsView: View {
             .onChange(of: notifyStopped) { _ in push.registerAll() }
             .onChange(of: notifyOff) { _ in push.registerAll() }
             .onChange(of: notifyMessages) { _ in push.registerAll() }
+            .onChange(of: notifyComplete) { _ in push.registerAll() }
+            .onChange(of: notifyBarChange) { _ in push.registerAll() }
+            .onChange(of: onlyWhileRunning) { _ in push.registerAll() }
             .onDisappear { store.restartPolling() }
             .confirmationDialog("Clear alarm history?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Clear history", role: .destructive) {

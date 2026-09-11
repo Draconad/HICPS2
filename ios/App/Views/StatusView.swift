@@ -34,6 +34,9 @@ struct StatusView: View {
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         ProgramCard(s: s)
+                        if let bc = s.barChanges, (bc.today ?? 0) > 0 || bc.lastS != nil {
+                            BarChangeCard(stats: bc, s: s)
+                        }
                         if !s.activeAlarms.isEmpty {
                             ActiveAlarmsCard(alarms: s.activeAlarms, offset: s.clockOffset)
                         }
@@ -116,9 +119,11 @@ struct StateHeader: View {
                 .font(.system(size: 38, weight: .semibold))
                 .foregroundStyle(.white)
             VStack(alignment: .leading, spacing: 2) {
-                Text(s.state.label.uppercased())
+                Text(s.headline.uppercased())
                     .font(.system(size: 26, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
                 if let d = s.stateDetail, !d.isEmpty {
                     Text(d)
                         .font(.subheadline.weight(.medium))
@@ -136,10 +141,10 @@ struct StateHeader: View {
         .padding(18)
         .frame(maxWidth: .infinity)
         .background(
-            LinearGradient(colors: [s.state.color, s.state.color.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing),
+            LinearGradient(colors: [s.headlineColor, s.headlineColor.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: s.state.color.opacity(0.35), radius: 10, y: 4)
-        .animation(.easeInOut, value: s.state)
+        .shadow(color: s.headlineColor.opacity(0.35), radius: 10, y: 4)
+        .animation(.easeInOut, value: s.headline)
     }
 }
 
@@ -148,7 +153,10 @@ struct PartsCard: View {
 
     private var remainingText: String? {
         guard let left = s.remaining else { return nil }
-        if left == 0 { return "Target reached" }
+        if left == 0 {
+            if let p = s.parts, let r = s.partsRequired, p > r { return "\(p - r) over the required count" }
+            return "Target reached"
+        }
         var t = "\(left) to go"
         if let eta = s.etaS { t += " · ~" + Fmt.span(eta) }
         return t
@@ -178,11 +186,47 @@ struct PartsCard: View {
                     .monospacedDigit()
                     .foregroundStyle(Color.primary.opacity(0.85))
             }
+            if let finish = s.finish, (s.remaining ?? 0) > 0 {
+                Label("Done ~" + finish.formatted(date: .omitted, time: .shortened), systemImage: "flag.checkered")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
             if let on = s.workCounter {
                 Label(on ? "Stops at count" : "Won't stop at count",
                       systemImage: on ? "stop.circle.fill" : "infinity.circle")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(on ? Color.green : Color.orange)
+            }
+        }
+    }
+}
+
+/// How long bar changes take - a slow one usually means the bar didn't load properly.
+struct BarChangeCard: View {
+    let stats: MachineStatus.BarChangeStats
+    let s: MachineStatus
+
+    private func stat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    var body: some View {
+        Card(title: "Bar changes") {
+            HStack(alignment: .top) {
+                stat("Today", "\(stats.today ?? 0)")
+                stat("Average", Fmt.span(stats.avgTodayS ?? stats.avgWeekS))
+                stat("Last", Fmt.span(stats.lastS))
+            }
+            if let last = s.date(stats.lastAt) {
+                Text("Last finished \(last.formatted(date: .omitted, time: .shortened))"
+                     + (stats.avgWeekS.map { " · 7-day average " + Fmt.span($0) } ?? ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

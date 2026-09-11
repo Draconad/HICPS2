@@ -120,7 +120,9 @@ final class LiveActivityManager: ObservableObject {
             updatedEpoch: Date().timeIntervalSince1970,
             barChangeStartEpoch: s.barChangeStart?.timeIntervalSince1970,
             counterStop: s.workCounter,
-            message: s.messages?.first?.text)
+            message: s.messages?.first?.text,
+            finishEpoch: s.finish.map { ($0.timeIntervalSince1970 / 60).rounded() * 60 },
+            overProducing: s.overProducing)
     }
 
     /// One-line summary shown in Settings to help work out why nothing appears.
@@ -197,6 +199,9 @@ final class LiveActivityManager: ObservableObject {
             if activity != nil { await stop() }
             return
         }
+        // "Only while running" (Settings > Notifications): leave the card as it was when the machine stopped,
+        // and don't start one until the machine runs again
+        if AppSettings.onlyWhileRunning, !(status?.inRunningWindow() ?? false) { return }
         let foreground = UIApplication.shared.applicationState == .active
 
         if let a = activity, let started = startedAt, Date().timeIntervalSince(started) > maxAge {

@@ -13,6 +13,9 @@ enum SettingsKey {
     static let notifyOff = "notifyOff"
     static let showCamera = "showCameraOnStatus"
     static let notifyMessages = "notifyMessages"
+    static let notifyComplete = "notifyJobComplete"
+    static let notifyBarChange = "notifyLongBarChange"
+    static let onlyWhileRunning = "notifyOnlyWhileRunning"
 }
 
 enum AppSettings {
@@ -31,6 +34,9 @@ enum AppSettings {
             SettingsKey.notifyOff: false,
             SettingsKey.showCamera: true,
             SettingsKey.notifyMessages: true,
+            SettingsKey.notifyComplete: true,
+            SettingsKey.notifyBarChange: true,
+            SettingsKey.onlyWhileRunning: false,
         ])
     }
 
@@ -44,4 +50,8 @@ enum AppSettings {
     static var notifyStopped: Bool { defaults.bool(forKey: SettingsKey.notifyStopped) }
     static var notifyMessages: Bool { defaults.bool(forKey: SettingsKey.notifyMessages) }
     static var notifyOff: Bool { defaults.bool(forKey: SettingsKey.notifyOff) }
+    static var notifyComplete: Bool { defaults.bool(forKey: SettingsKey.notifyComplete) }
+    static var notifyBarChange: Bool { defaults.bool(forKey: SettingsKey.notifyBarChange) }
+    /// Notifications and Live Activity updates only while the machine is running (+15 s after it stops)
+    static var onlyWhileRunning: Bool { defaults.bool(forKey: SettingsKey.onlyWhileRunning) }
 }

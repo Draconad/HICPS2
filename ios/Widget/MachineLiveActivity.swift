@@ -17,12 +17,12 @@ struct MachineLiveActivity: Widget {
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             let s = context.state
-            let color = context.isStale ? MachineStateKind.off.color : s.kind.color
+            let color = context.isStale ? MachineStateKind.off.color : s.headlineColor
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 6) {
                         Circle().fill(color).frame(width: 12, height: 12)
-                        Text(s.kind.label)
+                        Text(s.shortHeadline)
                             .font(.headline)
                             .foregroundStyle(color)
                     }
@@ -103,7 +103,7 @@ struct LockScreenView: View {
     let s: MachineActivityAttributes.ContentState
     let stale: Bool
 
-    var color: Color { stale ? MachineStateKind.off.color : s.kind.color }
+    var color: Color { stale ? MachineStateKind.off.color : s.headlineColor }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -114,8 +114,10 @@ struct LockScreenView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Image(systemName: s.kind.symbol).foregroundStyle(color)
-                    Text(s.kind.label.uppercased())
+                    Text(s.headline.uppercased())
                         .font(.subheadline.weight(.heavy))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .foregroundStyle(color)
                     if !s.program.isEmpty {
                         Text(s.program)

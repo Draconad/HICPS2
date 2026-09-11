@@ -81,6 +81,9 @@ def main(argv=None):
         from .commands import CommandClient
         cmd = CommandClient(cfg, col, cam)
         cmd.start()
+        from .updater import Updater
+        upd = Updater(cfg, on_restart=lambda: os._exit(0))
+        upd.start()
         signal.signal(signal.SIGINT, lambda *_: (cmd.stop(), cam.stop(), col.stop(), up.stop(), sys.exit(0)))
         while True:
             time.sleep(1)

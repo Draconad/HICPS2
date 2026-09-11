@@ -98,7 +98,9 @@ Environment options:
 | `RESET_LOGIN` | *(blank)* | `true` resets the dashboard login to admin / admin on start. Remove it again afterwards. |
 | `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
 | `STANDBY_DELAY` | `4` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles). |
-| `TZ` | | Your timezone, used for the "alarms today" count. |
+| `BAR_CHANGE_ALERT` | `180` | A bar change taking longer than this many seconds sends a "bar change taking long" notification (usually a bar that didn't load). |
+| `PUSH_RUNNING_GRACE` | `15` | For phones with **Only while the machine is running** switched on: how many seconds after the machine stops notifications still come through. |
+| `TZ` | | Your timezone, used for the "alarms today" and "bar changes today" counts. |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(blank)* | Apple push. See section 4. Put the `AuthKey_….p8` in the data folder. |
 
 ---
@@ -136,6 +138,25 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 ### Bar change
 While the bar-change subprogram **O9002** is running, the status shows **Bar change** (blue) everywhere: the PC app, dashboard, iPhone app and Live Activity, with a timer. The part made across a bar change doesn't count towards the cycle time. The program number is under Settings > **Bar change program**, where 0 turns it off. There's also an optional **Bar change M code** setting, off by default.
 The Program box always shows your main part program, not the subprogram it has called.
+
+### Status at a glance
+The dashboard opens with a large status banner, readable from across the shop: green **Running**, blue **Bar change**, amber **Standby**, grey **Off**, and a flashing red **Alarm** that shows the alarm code and message. It also shows when that state started and for how long, e.g. "Since 14:02 · 1 hr, 45 min". The browser tab title and the strip along the top of the page change colour too.
+
+If the machine keeps running past the required count, the status changes to orange **Running – Over producing**, with how many parts over it is. This shows on the dashboard, the iPhone app, the Live Activity and the PC app. It usually means **Stop at required count** is off.
+
+### Finish time and job complete
+While the machine is running towards a required count, the part count shows the estimated finish time, e.g. "Done ~17:40", based on the last cycle time. This is on the dashboard, the app, the Live Activity and the PC app. When the count reaches the required count, a **✅ Job complete** notification is sent. It can be switched off in the app under Settings > Notifications.
+
+### Bar change statistics
+Every bar change is timed. The dashboard and the app's Status screen show today's count, the average and the last one, plus a 7-day average. A bar change that takes longer than `BAR_CHANGE_ALERT` seconds (3 minutes by default) sends a **⏳ Bar change taking long** notification, which usually means the bar didn't load. The history is at `/api/barchanges`.
+
+### Automatic updates of this app
+From version 1.8.0 the PC app updates itself, so the exe only has to be copied to the machine PC once.
+1. `push-to-github.bat` stores the update-signing key as a GitHub secret the first time it runs (from `update-signing-key.txt`, which it then deletes). GitHub Actions signs every Windows build with it.
+2. After the build, `wait-for-builds.ps1` sends the signed exe to your Unraid server. The first time, it asks for the server address and API key and saves them in `update-server.txt`. That file isn't uploaded to GitHub. Type `skip` to never be asked again.
+3. The PC app checks the server every 30 minutes. When there's a newer version, it downloads it, checks the signature, closes, swaps in the new exe and starts again, all within a few seconds. Click the version number at the bottom of the PC app to check straight away.
+
+The PC app only installs a build whose signature matches the key built into it, and that key only exists as a GitHub secret. Neither the server nor anyone with the API key can make the machine PC run anything else. To turn updates off, untick **Update automatically from the server** in Settings. The dashboard footer shows the PC app's version and whether an update is waiting.
 
 ### Camera (Tapo C210 or any RTSP camera)
 The PC app reads the camera on the machine's network and sends it to the server. It shows on the dashboard, below the part count, and on the iPhone app's **Camera** tab. Only the PC app talks to the camera; nothing new is opened up on the network.
@@ -238,6 +259,7 @@ New device: register its UDID (A0), push again so the signing includes it, then 
 What push changes:
 - **The Live Activity stays current while the app is closed.** The server sends an update whenever the status, parts, cycle or alarms change, and a refresh every 10 minutes.
 - **Alarm notifications arrive even when the app is closed.** They're *Time Sensitive*, so they get through Focus modes. The stopped and off notifications follow your Settings toggles.
+- **Only while the machine is running** (Settings > Notifications): notifications and Live Activity updates are only sent while the machine is running, and for 15 seconds after it stops, so the alarm that stopped it still comes through. Nothing arrives while it's sitting idle, e.g. overnight. This is set per phone.
 - **The 8-hour limit is handled on iOS/iPadOS 17.2 or later.** Just before iOS ends a Live Activity, the server ends it and starts a fresh one by push. It also starts one on its own when the machine changes state and none is showing, unless you've switched Live Activities off in Settings.
 - **The silent-audio trick is no longer needed.** It's off by default now.
 
@@ -274,7 +296,7 @@ If the GitHub secrets aren't set, the build makes an unsigned `HanwhaMonitor-bN.
   - Program number, program comment, and the Main/Sub path modes.
   - Active alarms.
 - **Alarms:** full history grouped by day. Each entry shows the FANUC-style code (e.g. `EX1051`), the message, Main/Sub path, the time it happened and how long it lasted. Tap one for details, or filter to active alarms only.
-- **Settings:** server, Live Activity, background updates, notifications (new alarm, machine stopped, machine off), and clearing the alarm history.
+- **Settings:** server, Live Activity, background updates, notifications (new alarm, machine message, job complete, slow bar change, machine stopped, machine off, only while running), and clearing the alarm history.
 - **Dynamic Island:**
   - Compact: status-colour dot with `118/500`.
   - Minimal: a status-coloured progress ring.

@@ -34,6 +34,9 @@ enum MachineStateKind: String, Codable, Hashable, CaseIterable {
         }
     }
 
+    /// Running past the required count: orange, so it stands out from normal running
+    static let overProducingColor = Color(red: 0.96, green: 0.46, blue: 0.13)
+
     var symbol: String {
         switch self {
         case .running: return "play.circle.fill"
@@ -69,8 +72,18 @@ struct MachineActivityAttributes: ActivityAttributes {
         var counterStop: Bool?
         /// The CNC's operator message, if any (e.g. "work count end in 1 hour")
         var message: String?
+        /// Estimated time the required count is reached (Unix time, rounded to the minute)
+        var finishEpoch: Double?
+        /// Still running after reaching the required count (the work counter isn't stopping it)
+        var overProducing: Bool?
 
         var kind: MachineStateKind { barChange == true && state == .running ? .barChange : state }
+        var isOverProducing: Bool { overProducing == true && kind == .running }
+        /// "Running – Over producing" or the plain state name
+        var headline: String { isOverProducing ? "Running – Over producing" : kind.label }
+        /// Short form for the Dynamic Island
+        var shortHeadline: String { isOverProducing ? "Over producing" : kind.label }
+        var headlineColor: Color { isOverProducing ? MachineStateKind.overProducingColor : kind.color }
         var barChangeStart: Date? { barChangeStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var cycleStart: Date? { cycleStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var updated: Date { Date(timeIntervalSince1970: updatedEpoch) }
@@ -90,7 +103,11 @@ struct MachineActivityAttributes: ActivityAttributes {
             guard let left = remaining else { return nil }
             if left == 0 { return "Target reached" }
             var t = "\(left) to go"
-            if let c = lastCycle, c > 0 { t += " · ~" + Fmt.span(Double(left) * c) }
+            if let f = finishEpoch, state.isRunning {
+                t += " · done ~" + Date(timeIntervalSince1970: f).formatted(date: .omitted, time: .shortened)
+            } else if let c = lastCycle, c > 0 {
+                t += " · ~" + Fmt.span(Double(left) * c)
+            }
             return t
         }
 

@@ -19,7 +19,33 @@
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
   h1 { font-size: 20px; margin: 0; }
   .sub { color: var(--muted); font-size: 13px; }
-  .pill { color: #fff; font-weight: 700; letter-spacing: .04em; padding: 8px 18px; border-radius: 999px; background: var(--off); }
+  /* the big status banner: readable from across the shop floor */
+  body { border-top: 8px solid var(--st, var(--off)); transition: border-color .3s; }
+  .status { --st: var(--off); display: flex; align-items: center; gap: clamp(14px, 3vw, 28px); margin-bottom: 16px;
+            padding: clamp(18px, 3.5vw, 30px) clamp(18px, 4vw, 34px); border-radius: 20px; background: var(--st);
+            color: var(--st-ink, #fff); transition: background-color .3s; }
+  .status .ico { font-size: clamp(44px, 10vw, 84px); line-height: 1; flex: none; }
+  .status .main { min-width: 0; flex: 1; }
+  .status .state { font-size: clamp(38px, 9.5vw, 96px); font-weight: 850; line-height: .95; letter-spacing: .01em;
+                   text-transform: uppercase; }
+  .status .detail { font-size: clamp(16px, 2.6vw, 22px); font-weight: 600; margin-top: 8px; opacity: .92;
+                    overflow-wrap: anywhere; }
+  .status .since { font-size: clamp(16px, 2.6vw, 24px); font-weight: 600; margin-top: 6px; opacity: .85;
+                   font-variant-numeric: tabular-nums; }
+  .status .since b { font-weight: 800; }
+  .status .state { white-space: nowrap; }
+  .status.s-over .state { white-space: normal; }
+  @media (max-width: 520px) { .status .ico { display: none; } }
+  .status.s-running { --st: var(--run); --st-ink: #03140a; }
+  .status.s-bar     { --st: var(--bar); }
+  .status.s-standby { --st: var(--stby); --st-ink: #1d1500; }
+  .status.s-off     { --st: #3a3d42; }
+  .status.s-over    { --st: var(--accent); --st-ink: #1a0b00; }
+  .status.s-over .state { font-size: clamp(30px, 6vw, 56px); }
+  .status .state small { display: block; font-size: .42em; letter-spacing: .04em; margin-bottom: .12em; }
+  .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.2s ease-in-out infinite; }
+  @keyframes alarmflash { 50% { background-color: #8e1712; } }
+  @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
   .label { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
@@ -88,10 +114,17 @@
   <header>
     <div>
       <h1 id="name">Hanwha Monitor</h1>
-      <div class="sub" id="detail">Loading…</div>
+      <div class="sub" id="seen">Loading…</div>
     </div>
-    <div class="pill" id="pill">—</div>
   </header>
+  <section class="status s-off" id="status" aria-live="polite">
+    <div class="ico" id="sticon">&#9711;</div>
+    <div class="main">
+      <div class="state" id="ststate">&mdash;</div>
+      <div class="detail" id="stdetail">Loading…</div>
+      <div class="since" id="stsince"></div>
+    </div>
+  </section>
   <div class="banner" id="openapi" hidden>
     <b>The data API has no key.</b> This page needs a login, but anyone who can reach the server can still read
     the machine data through <code>/api</code>. Set <code>API_KEY</code> on the Docker container (and the same key in
@@ -102,6 +135,7 @@
     <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
     <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
     <div class="card"><div class="label">Program</div><div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
+    <div class="card" id="bccard" hidden><div class="label">Bar changes today</div><div class="value" id="bctoday">—</div><div class="sub" id="bcsub"></div></div>
   </div>
 
   <div class="msgs" id="msgs"></div>
@@ -147,11 +181,15 @@
 <script>
 const key = new URLSearchParams(location.search).get("key");
 const q = key ? `?key=${encodeURIComponent(key)}` : "";
-const colors = { running: "var(--run)", standby: "var(--stby)", alarm: "var(--alarm)", off: "var(--off)" };
 const dur = s => { if (s == null) return "—"; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
   return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}` : `${m}:${String(x).padStart(2,"0")}`; };
 const span = s => { s = Math.round(s); if (s >= 86400) return `${Math.floor(s / 86400)}d ${Math.floor(s % 86400 / 3600)}h`;
-  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`; return s >= 60 ? `${Math.floor(s / 60)}m` : `${s}s`; };
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
+  if (s >= 600) return `${Math.floor(s / 60)}m`; return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
+const rel = s => { s = Math.max(0, Math.floor(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  if (d) return `${d} day${d > 1 ? "s" : ""}${h ? `, ${h} hr` : ""}`;
+  if (h) return `${h} hr${m ? `, ${m} min` : ""}`;
+  return m ? `${m} min` : `${s} sec`; };
 const t = ts => new Date(ts * 1000).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const $ = id => document.getElementById(id);
@@ -165,14 +203,41 @@ async function status() {
   const s = await getJSON("api/status" + q);
   $("name").textContent = s.machine_name + (s.demo ? " (demo)" : "");
   const bar = s.state === "running" && s.bar_change;
-  $("detail").textContent = bar ? `Changing bar${s.bar_change_since ? " · " + dur(Date.now() / 1000 - s.bar_change_since) : ""}` : (s.state_detail || "");
-  $("pill").textContent = bar ? "BAR CHANGE" : s.state.toUpperCase();
-  $("pill").style.background = bar ? "var(--bar)" : (colors[s.state] || "var(--off)");
+  const now = s.server_time || Date.now() / 1000;
+  const kind = bar ? "bar" : (s.state === "running" && s.over_producing) ? "over"
+             : (["running", "standby", "alarm", "off"].includes(s.state) ? s.state : "off");
+  const label = { running: "Running", over: "Running – Over producing", bar: "Bar change", standby: "Standby",
+                  alarm: "Alarm", off: "Off" }[kind];
+  const icon = { running: "&#9654;", over: "&#9654;", bar: "&#8635;", standby: "&#10074;&#10074;", alarm: "&#9888;",
+                 off: "&#9211;" }[kind];
+  const a0 = (s.active_alarms || [])[0];
+  let detail = s.state_detail || "";
+  if (bar) detail = "Changing bar" + (s.bar_change_since ? " · " + dur(now - s.bar_change_since) : "");
+  else if (kind === "alarm" && a0) detail = `${a0.code || "ALARM"} ${a0.message || ""}`.trim()
+                                            + (s.active_alarms.length > 1 ? `  (+${s.active_alarms.length - 1} more)` : "");
+  else if (kind === "standby" && detail.toLowerCase() === "standby") detail = "Standby – not cutting";
+  else if (kind === "over") detail = `${s.parts - s.parts_required} past the required count of ${s.parts_required}`
+                                     + (s.work_counter === false ? " · stop at count is off" : "");
+  const st = $("status");
+  st.className = "status s-" + kind;
+  $("sticon").innerHTML = icon;
+  if (kind === "over") $("ststate").innerHTML = "<small>Running &ndash;</small>Over producing";
+  else $("ststate").textContent = label;
+  $("stdetail").textContent = detail;
+  const since = bar ? s.bar_change_since : s.state_since;
+  // like the app: "Since 14:02 · 1 hr, 45 min" (the phone's clock, corrected for drift)
+  const drift = Date.now() / 1000 - now;
+  $("stsince").innerHTML = since ? `Since ${new Date((since + drift) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                                   + ` &middot; <b>${rel(now - since)}</b>` : "";
+  document.body.style.setProperty("--st", getComputedStyle(st).getPropertyValue("--st"));
+  document.title = `${label.toUpperCase()} · ${s.machine_name}`;
   $("parts").textContent = s.parts == null ? "—" : (s.parts_required ? `${s.parts} / ${s.parts_required}` : s.parts);
   $("bar").style.width = (s.parts_required ? Math.min(100, 100 * s.parts / s.parts_required) : 0) + "%";
   const left = (s.parts != null && s.parts_required) ? Math.max(0, s.parts_required - s.parts) : null;
-  const toGo = left == null ? "" : (left === 0 ? '<b style="color:var(--run)">Target reached</b>'
-    : `<b style="color:var(--ink)">${left} to go</b>${s.eta_s ? ` &middot; done in ~${span(s.eta_s)}` : ""}`);
+  const toGo = left == null ? "" : (left === 0 ? (s.parts > s.parts_required
+      ? `<b style="color:var(--accent)">${s.parts - s.parts_required} over the required count</b>` : '<b style="color:var(--run)">Target reached</b>')
+    : `<b style="color:var(--ink)">${left} to go</b>${s.eta_s ? ` &middot; ~${span(s.eta_s)}` : ""}`
+      + (s.finish_at ? `<br>&#127937; Done ~${new Date(s.finish_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""));
   $("eta").innerHTML = [toGo,
     s.work_counter == null ? "" : (s.work_counter ? '<span style="color:var(--run);font-weight:600">&#9632; Stops at count</span>'
                                                   : '<span style="color:#ff9f0a;font-weight:600">&infin; Won\'t stop at count</span>')]
@@ -188,7 +253,17 @@ async function status() {
   camUpdate(s.camera);
   $("msgs").innerHTML = (s.messages || []).map(m =>
     `<div class="msg">&#128172; ${esc(m.text || "Message " + m.number)}<span class="t">since ${t(m.started_at)}</span></div>`).join("");
-  $("foot").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
+  const bc = s.bar_changes || {};
+  $("bccard").hidden = !(bc.today || bc.last_s);
+  $("bctoday").textContent = bc.today || 0;
+  $("bcsub").innerHTML = [bc.avg_today_s || bc.avg_week_s ? `Average ${span(bc.avg_today_s || bc.avg_week_s)}` : "",
+    bc.last_s ? `Last ${span(bc.last_s)}${bc.last_at ? " at " + new Date(bc.last_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}` : "",
+    bc.avg_week_s && bc.avg_today_s ? `7-day average ${span(bc.avg_week_s)}` : ""].filter(Boolean).join("<br>");
+  $("seen").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
+  const cmp = (a, b) => { a = String(a).split(".").map(Number); b = String(b).split(".").map(Number);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  $("foot").textContent = (s.agent_version ? `PC app v${s.agent_version}` : "")
+    + (s.agent_update && s.agent_version && cmp(s.agent_update, s.agent_version) > 0 ? ` · v${s.agent_update} waiting to install` : "");
 }
 async function history() {
   const r = await getJSON("api/alarms" + (q ? q + "&" : "?") + "limit=200");

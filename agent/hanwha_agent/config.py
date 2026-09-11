@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "HanwhaMonitor"
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 
 def normalize_url(url: str) -> str:
@@ -43,7 +43,7 @@ class Config:
     count_path: int = 1               # path whose part counter / cycle timer / program is shown
     bar_change_program: int = 9002    # subprogram that does the bar change (O9002 on the XE35; 0 = off)
     bar_change_mcode: int = 0         # optional: also while this M code is the active block (0 = off)
-    work_counter_signal: str = ""
+    work_counter_signal: str = ""     # PMC bit / macro var that is on when "stop at required count" is enabled, e.g. K5.3
     # the app's Controls tab: change the required count / stop-at-count from the phone. Off unless ticked here.
     remote_control: bool = False
     # camera (Tapo C210 etc. over RTSP, relayed to the server)
@@ -57,13 +57,14 @@ class Config:
     camera_audio: bool = True         # include the camera's microphone in the live video (muted until unmuted)
     camera_ptz: bool = True           # pan/tilt buttons in the app/dashboard (ONVIF, camera account)
     camera_retime: bool = False       # stamp frames with their arrival time (fixes cameras with jumpy timestamps)
-    ffmpeg_path: str = ""             # blank = ffmpeg.exe next to the .exe, or on PATH     # PMC bit / macro var that is on when "stop at required count" is enabled, e.g. K5.3
+    ffmpeg_path: str = ""             # blank = ffmpeg.exe next to the .exe, or on PATH
     server_url: str = "http://tower.local:8420"
     api_key: str = ""
     dll_path: str = ""                # blank = look next to the exe
     demo_mode: bool = False
     start_minimized: bool = False
     autostart: bool = False
+    auto_update: bool = True          # install new signed versions of this app from the server
 
     @property
     def paths(self) -> list[tuple[int, str]]:

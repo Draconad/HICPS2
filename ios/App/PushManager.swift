@@ -35,7 +35,8 @@ final class PushManager: ObservableObject {
 
     var prefs: [String: Bool] {
         ["alarms": AppSettings.notifyAlarms, "stopped": AppSettings.notifyStopped, "off": AppSettings.notifyOff,
-         "messages": AppSettings.notifyMessages]
+         "messages": AppSettings.notifyMessages, "complete": AppSettings.notifyComplete,
+         "barchange": AppSettings.notifyBarChange, "running_only": AppSettings.onlyWhileRunning]
     }
 
     // MARK: - from the app delegate
@@ -106,7 +107,7 @@ final class PushManager: ObservableObject {
         do {
             let enabled = try await APIClient.current.pushRegister(kind: kind, token: token, activityID: activityID,
                                                                    env: Self.apsEnvironment,
-                                                                   prefs: kind == "alert" ? prefs : nil)
+                                                                   prefs: prefs)   // Live Activity tokens too: "only while running"
             serverPushEnabled = enabled
             lastRegistered = Date()
             EventLog.shared.add("registered \(kind) token with server (server push \(enabled ? "on" : "OFF"))")

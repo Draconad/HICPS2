@@ -16,5 +16,7 @@
   <Config Name="App bundle ID (APNs topic)" Target="APNS_TOPIC" Default="com.jtquayle.hicps2" Type="Variable" Display="always" Required="false">com.jtquayle.hicps2</Config>
   <Config Name="Agent timeout (s)" Target="AGENT_TIMEOUT" Default="30" Type="Variable" Display="advanced" Required="false">30</Config>
   <Config Name="Reset dashboard login" Target="RESET_LOGIN" Default="" Mode="" Description="Set to true and restart to reset the dashboard login to admin / admin. Clear it again afterwards." Type="Variable" Display="advanced" Required="false"></Config>
+  <Config Name="Bar change alert (s)" Target="BAR_CHANGE_ALERT" Default="180" Mode="" Description="Notify when a bar change takes longer than this (usually a bar that didn't load)." Type="Variable" Display="advanced" Required="false">180</Config>
+  <Config Name="Push grace after stopping (s)" Target="PUSH_RUNNING_GRACE" Default="15" Mode="" Description="Phones set to 'only while running' still get notifications for this long after the machine stops." Type="Variable" Display="advanced" Required="false">15</Config>
   <Config Name="Standby delay (s)" Target="STANDBY_DELAY" Default="4" Mode="" Description="Running only changes to Standby once the machine has been stopped this long - hides the short pause between part cycles." Type="Variable" Display="advanced" Required="false">4</Config>
 </Container>

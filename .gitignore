@@ -16,3 +16,5 @@ ios/Widget/Info.plist
 *.dll
 build-out/
 ios/build.log
+update-signing-key.txt
+update-server.txt

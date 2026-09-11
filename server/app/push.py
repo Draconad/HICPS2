@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 import threading
 import time
@@ -18,6 +19,9 @@ STALE_AFTER = 15 * 60          # stale-date sent with every update
 ROLLOVER_AGE = 7.6 * 3600      # iOS ends Live Activities at 8 h - replace ours a bit before
 MIN_GAP_LOW_PRIORITY = 5       # seconds between routine updates to the same Live Activity
 START_THROTTLE = 10 * 60       # don't push-to-start more than this often
+# devices with "only while running" on still get everything for this long after the machine stops,
+# so the alarm that stopped it (or one right after) still comes through
+RUNNING_GRACE = float(os.environ.get("PUSH_RUNNING_GRACE", "15"))
 
 
 class PushService:
@@ -102,12 +106,16 @@ class PushService:
         msgs = s.get("messages") or []
         if msgs:
             c["message"] = msgs[0].get("text") or ""
+        if s.get("finish_at"):
+            c["finishEpoch"] = round(s["finish_at"] / 60) * 60   # to the minute: no push for every second it shifts
         for key, src in (("parts", "parts"), ("required", "parts_required"), ("lastCycle", "last_cycle_s"),
                          ("cycleStartEpoch", "cycle_started_at")):
             if s.get(src) is not None:
                 c[key] = s[src]
         if s.get("work_counter") is not None:
             c["counterStop"] = bool(s["work_counter"])
+        if s.get("over_producing"):
+            c["overProducing"] = True
         if s.get("bar_change"):   # state stays "running" so older app builds still decode it
             c["barChange"] = True
             if s.get("bar_change_since"):
@@ -166,6 +174,15 @@ class PushService:
         machine = s.get("machine_name") or "Hanwha XE35"
         prev_state = self.kv_get("push_last_state")
         state_changed = prev_state is not None and prev_state != s["state"]
+        ended = s.get("running_ended_at")
+        in_window = s["state"] == "running" or bool(ended and now - ended <= RUNNING_GRACE)
+
+        def muted(row) -> bool:
+            """This device only wants notifications / Live Activity updates while the machine is running."""
+            try:
+                return bool(json.loads(row["prefs"] or "{}").get("running_only")) and not in_window
+            except (ValueError, TypeError):
+                return False
 
         # ---- alarm + state alerts -------------------------------------------------
         notified = set(self.kv_get("push_notified_alarms", []) or [])
@@ -174,6 +191,7 @@ class PushService:
                       and now - a["started_at"] < 15 * 60]
         with self.lock:
             alert_rows = self.db.execute("SELECT * FROM push_tokens WHERE kind='alert'").fetchall()
+        alert_rows = [r for r in alert_rows if not muted(r)]
         for row in alert_rows:
             prefs = json.loads(row["prefs"] or "{}")
             if prefs.get("alarms", True):
@@ -204,6 +222,30 @@ class PushService:
         if new_msgs or {m["id"] for m in active_msgs} != msg_notified:
             self.kv_set("push_notified_messages", sorted({m["id"] for m in active_msgs} | {m["id"] for m in new_msgs}))
 
+        # ---- job complete (count reached the required count) --------------------------
+        jc = s.get("job_complete") or {}
+        if jc.get("at") and jc["at"] != self.kv_get("push_job_complete_at") and now - jc["at"] < 600:
+            for row in alert_rows:
+                if json.loads(row["prefs"] or "{}").get("complete", True):
+                    self._send(row, {"aps": {"alert": {"title": f"✅ {machine}: job complete",
+                                                       "body": f"{jc.get('parts')}/{jc.get('required')} parts"},
+                                             "sound": "default", "thread-id": "job"}}, "alert", 10,
+                               collapse=f"job{int(jc['at'])}")
+            self.kv_set("push_job_complete_at", jc["at"])
+
+        # ---- bar change taking unusually long (usually a failed bar load) ----------------
+        since = s.get("bar_change_since")
+        limit = (s.get("bar_changes") or {}).get("alert_after_s") or 180
+        if s.get("bar_change") and since and now - since > limit and self.kv_get("push_bar_alert_for") != since:
+            dur = int(now - since)
+            for row in alert_rows:
+                if json.loads(row["prefs"] or "{}").get("barchange", True):
+                    self._send(row, {"aps": {"alert": {"title": f"⏳ {machine}: bar change taking long",
+                                                       "body": f"{dur // 60} min {dur % 60} s so far"},
+                                             "sound": "default", "interruption-level": "time-sensitive",
+                                             "thread-id": "barchange"}}, "alert", 10, collapse=f"bar{int(since)}")
+            self.kv_set("push_bar_alert_for", since)
+
         if new_alarms or set(active_ids) != notified:
             self.kv_set("push_notified_alarms", sorted(set(active_ids) | {a["id"] for a in new_alarms}))
         self.kv_set("push_last_state", s["state"])
@@ -211,6 +253,7 @@ class PushService:
         # ---- Live Activity updates -----------------------------------------------
         with self.lock:
             la_rows = self.db.execute("SELECT * FROM push_tokens WHERE kind='la'").fetchall()
+        # rollover still applies to muted ones (iOS would end them at 8 h anyway); updates don't
         alert = None
         if new_alarms:
             a = new_alarms[0]
@@ -225,6 +268,8 @@ class PushService:
                 self.unregister(token=row["token"])
                 self.kv_set("push_rollover_pending", True)
                 continue
+            if muted(row):
+                continue
             last_key = row["last_content"]
             changed = last_key != key
             due = now - (row["last_push"] or 0) > HEARTBEAT
@@ -233,7 +278,8 @@ class PushService:
             prev_c = json.loads(last_key) if last_key else {}
             important = state_changed or bool(new_alarms) or (last_key and (
                 prev_c.get("state") != content["state"] or bool(prev_c.get("barChange")) != bool(content.get("barChange"))
-                or prev_c.get("message") != content.get("message")))
+                or prev_c.get("message") != content.get("message")
+                or bool(prev_c.get("overProducing")) != bool(content.get("overProducing"))))
             if not important and now - (row["last_push"] or 0) < MIN_GAP_LOW_PRIORITY:
                 continue
             aps = {"timestamp": int(now), "event": "update", "content-state": content,
@@ -248,6 +294,7 @@ class PushService:
         with self.lock:
             has_la = self.db.execute("SELECT COUNT(*) n FROM push_tokens WHERE kind='la'").fetchone()["n"] > 0
             start_rows = self.db.execute("SELECT * FROM push_tokens WHERE kind='la_start'").fetchall()
+        start_rows = [r for r in start_rows if not muted(r)]
         rollover = bool(self.kv_get("push_rollover_pending", False))
         last_start = float(self.kv_get("push_last_start", 0) or 0)
         if not has_la and start_rows and (rollover or state_changed or new_alarms) and now - last_start > START_THROTTLE:

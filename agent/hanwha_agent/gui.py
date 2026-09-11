@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 import time
@@ -14,6 +15,7 @@ from tkinter import messagebox, ttk
 from .camera import CameraRelay
 from .collector import Collector
 from .commands import CommandClient
+from .updater import Updater
 from . import signals
 from .focas import FocasMachine, MockMachine, parse_signal
 from .config import VERSION, Config, data_dir, normalize_url, set_autostart
@@ -84,6 +86,7 @@ class App:
         self.uploader: Uploader | None = None
         self.camera: CameraRelay | None = None
         self.commands: CommandClient | None = None
+        self.updater: Updater | None = None
         self.log_q: queue.Queue = queue.Queue(maxsize=2000)
         h = QueueLogHandler(self.log_q)
         h.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s", "%H:%M:%S"))
@@ -244,7 +247,10 @@ class App:
         foot.pack(fill="x", padx=16, pady=(0, 8))
         self.demo_lbl = tk.Label(foot, text="", bg=BG, fg="#f59e0b", font=self._font(9, True))
         self.demo_lbl.pack(side="left")
-        tk.Label(foot, text=f"v{VERSION}", bg=BG, fg=MUTED, font=self._font(8, False)).pack(side="right")
+        self.version_lbl = tk.Label(foot, text=f"v{VERSION}", bg=BG, fg=MUTED, font=self._font(8, False),
+                                    cursor="hand2")
+        self.version_lbl.pack(side="right")
+        self.version_lbl.bind("<Button-1>", lambda _e: self.check_update())
 
     def _conn_card(self, parent, title, col):
         f = ttk.Frame(parent, style="Card.TFrame", padding=(12, 8))
@@ -335,6 +341,7 @@ class App:
                 r += 1
         for key, label in (("remote_control", "Allow remote changes from the app (required count, stop at count)"),
                            ("autostart", "Start automatically when Windows starts"),
+                           ("auto_update", "Update automatically from the server (signed builds only)"),
                            ("start_minimized", "Start minimised to the tray"),
                            ("demo_mode", "Demo mode (simulated machine — for testing the app)")):
             var = tk.BooleanVar(value=bool(getattr(self.cfg, key)))
@@ -612,6 +619,8 @@ class App:
         self.camera.start()
         self.commands = CommandClient(self.cfg, self.collector, self.camera)
         self.commands.start()
+        self.updater = Updater(self.cfg, on_restart=self._restart_for_update)
+        self.updater.start()
         self.collector.listeners.append(self.uploader.submit)
         self.uploader.start()
         self.collector.start()
@@ -619,6 +628,8 @@ class App:
                  " (DEMO MODE)" if self.cfg.demo_mode else "")
 
     def stop_services(self):
+        if getattr(self, "updater", None):
+            self.updater.stop()
         if self.commands:
             self.commands.stop()
         if self.camera:
@@ -698,8 +709,16 @@ class App:
         if state == "running" and snap.get("bar_change"):
             state = "barchange"
         self._draw_pill(state)
-        self.detail_lbl.configure(text=snap.get("state_detail") or "")
+        detail = snap.get("state_detail") or ""
+        req_, parts_ = snap.get("parts_required"), snap.get("parts")
+        if state == "running" and req_ and parts_ is not None and parts_ >= req_:
+            detail = f"Running – Over producing ({parts_ - req_} past the required count)"
+        self.detail_lbl.configure(text=detail)
         self.demo_lbl.configure(text="DEMO MODE — simulated data" if cfg.demo_mode else "")
+        st = self.updater.status if self.updater else ""
+        if st.startswith(("Update v", "Downloading", "Installing", "Refused")):
+            self.version_lbl.configure(text=f"v{VERSION} · {st}",
+                                       fg="#f87171" if st.startswith("Refused") else "#f59e0b")
 
         if col and col.state.machine_connected:
             self._set_card(self.machine_card, True, "Connected", f"{cfg.machine_ip}:{cfg.machine_port} · polled {ago(col.state.last_poll_ok)}")
@@ -728,7 +747,9 @@ class App:
             left = (req - parts) if req else None
             sub = []
             if left and left > 0 and snap.get("last_cycle_s"):
-                sub.append(f"{left} to go · done in ~{fmt_duration(left * snap['last_cycle_s'])}")
+                secs = left * snap["last_cycle_s"]
+                done = datetime.fromtimestamp(time.time() + secs).strftime("%H:%M")
+                sub.append(f"{left} to go · done ~{done} ({fmt_duration(secs)})")
             if snap.get("parts_total") is not None:
                 sub.append(f"Total {snap['parts_total']}")
             text = "   ".join(sub)
@@ -821,6 +842,28 @@ class App:
         else:
             if messagebox.askyesno("Quit", "Stop monitoring the machine and quit?"):
                 self.quit()
+
+    # ------------------------------------------------------------------ automatic updates
+    def check_update(self):
+        """Clicking the version in the footer: check the server now and install if there's a newer build."""
+        up = getattr(self, "updater", None)
+        if not up:
+            return
+        self.version_lbl.config(text=f"v{VERSION} · checking…")
+
+        def work():
+            try:
+                msg = up.check(install=bool(self.cfg.auto_update))
+            except Exception as e:  # noqa: BLE001
+                msg = f"Update check failed: {e}"
+            self.root.after(0, lambda: self.version_lbl.config(text=f"v{VERSION} · {msg}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _restart_for_update(self):
+        log.info("Closing so the update can be installed")
+        # a stuck thread must never stop the swap: hard-exit if a clean shutdown takes too long
+        threading.Timer(8, lambda: os._exit(0)).start()
+        self.root.after(0, self.quit)
 
     def quit(self):
         log.info("Shutting down")

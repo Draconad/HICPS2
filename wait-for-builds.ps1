@@ -140,6 +140,7 @@ $outDir = Join-Path $here "build-out"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $anyFailed = $false
 $saved = @()
+$exeOut = $null
 
 foreach ($t in $targets) {
   $runId = $t.RunId
@@ -184,6 +185,9 @@ foreach ($t in $targets) {
   }
   $dest = Join-Path $outDir $t.Out
   Move-Item -Force $src $dest
+  $sigSrc = Join-Path $tmp ($t.File + ".sig")
+  if (Test-Path $sigSrc) { Move-Item -Force $sigSrc ($dest + ".sig") }
+  if ($t.Workflow -eq "agent.yml") { $exeOut = $dest }
   $ff = Join-Path $tmp "ffmpeg.exe"
   if (Test-Path $ff) {
     Move-Item -Force $ff (Join-Path $outDir "ffmpeg.exe")
@@ -194,6 +198,66 @@ foreach ($t in $targets) {
   $saved += $dest
 }
 
+# ---- automatic updates: hand the signed .exe to the Unraid server -----------
+# The PC app on the machine checks the server every 30 minutes and installs a
+# newer version itself - but only if GitHub's signature on it is valid.
+function Send-Update($exe) {
+  $sigFile = $exe + ".sig"
+  if (-not (Test-Path $sigFile)) {
+    Write-Host "Windows app isn't signed yet (no UPDATE_SIGNING_KEY secret) - copy it to the machine PC by hand." -ForegroundColor Yellow
+    return
+  }
+  $lines = @(Get-Content $sigFile | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  $sig = $lines[0]
+  $ver = if ($lines.Count -gt 1) { $lines[1] } else { $agentVersion }
+  $cfgFile = Join-Path $here "update-server.txt"
+  if (-not (Test-Path $cfgFile)) {
+    Write-Host ""
+    Write-Host "Automatic updates: the PC app on the machine can update itself from your Unraid server."
+    Write-Host "Enter the server address (e.g. http://192.168.11.20:8420), or 'skip' to never ask again."
+    $u = (Read-Host "Server address").Trim()
+    if (-not $u -or $u -eq "skip") { Set-Content -Path $cfgFile -Value "skip" -Encoding ascii; return }
+    $k = (Read-Host "Server API key (blank if none)").Trim()
+    Set-Content -Path $cfgFile -Value @($u, $k) -Encoding ascii
+    Write-Host "Saved in update-server.txt (not uploaded to GitHub). Delete that file to change it."
+  }
+  $conf = @(Get-Content $cfgFile)
+  $url = "$($conf[0])".Trim().TrimEnd("/")
+  if (-not $url -or $url -eq "skip") { return }
+  if ($url -notmatch '^https?://') { $url = "http://" + $url }
+  $key = if ($conf.Count -gt 1) { "$($conf[1])".Trim() } else { "" }
+  $headers = @{}
+  if ($key) { $headers["X-API-Key"] = $key }
+  $ProgressPreference = "SilentlyContinue"   # PowerShell 5.1's progress bar makes uploads crawl
+  $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+  try {
+    $cur = Invoke-RestMethod -Uri "$url/api/agent/update" -Headers $headers -TimeoutSec 10 -UseBasicParsing
+    if ($cur.sha256 -eq $hash) {
+      Write-Host "Automatic updates: the server already has v$ver." -ForegroundColor DarkGray
+      return
+    }
+  } catch {
+    if ("$($_.Exception.Message)" -match "401") {
+      Write-Host "Automatic updates: the server refused the API key in update-server.txt - delete that file and run this again." -ForegroundColor Yellow
+      return
+    }
+    Write-Host "Automatic updates: can't reach $url ($($_.Exception.Message))." -ForegroundColor Yellow
+    Write-Host "  Run wait-for-builds.ps1 again from the workshop network, or copy the .exe by hand."
+    return
+  }
+  Write-Host "Automatic updates: sending v$ver to the server..."
+  $headers["X-Signature"] = $sig
+  try {
+    Invoke-RestMethod -Method Put -Uri "$url/api/agent/update?version=$ver" -InFile $exe -Headers $headers `
+      -ContentType "application/octet-stream" -TimeoutSec 600 -UseBasicParsing | Out-Null
+    Write-Host "  Done - the machine PC will install v$ver within 30 minutes (or click its version number)." -ForegroundColor Green
+  } catch {
+    Write-Host "  Upload failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "  (Wrong API key? Delete update-server.txt and run this again.)"
+  }
+}
+if ($exeOut) { Send-Update $exeOut }
+
 Write-Host ""
 if ($saved.Count -gt 0) {
   Start-Process explorer.exe -ArgumentList "/select,`"$($saved[0])`""
@@ -201,6 +265,6 @@ if ($saved.Count -gt 0) {
 if ($anyFailed) {
   Pause-Exit 1
 }
-Write-Host "Done. iPhone: update from TestFlight (or install the .ipa with iLoader); copy the .exe to the machine PC" -ForegroundColor Green
-Write-Host "(next to Fwlib32.dll and fwlibe1.dll), plus ffmpeg.exe if you use the camera."
+Write-Host "Done. iPhone: update from TestFlight (or install the .ipa with iLoader). The machine PC updates itself" -ForegroundColor Green
+Write-Host "from the server; for a first install copy the .exe next to Fwlib32.dll and fwlibe1.dll (+ ffmpeg.exe for the camera)."
 Pause-Exit 0

@@ -8,6 +8,8 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/alarms     alarm history  (?limit=100&before=<epoch>&active=1)
   DELETE /api/alarms   clear cleared history  (?demo=1: delete demo-mode alarms only)
   GET  /api/states     state change log (?hours=24)
+  PUT  /api/agent/update?version=X  (exe body, X-Signature header)   GET /api/agent/update   GET /api/agent/update/download
+  GET  /api/barchanges   bar change history
   GET  /api/messages   operator message history (?limit=100) - e.g. "work count end in 1 hour", not alarms
   GET  /api/health
   POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
@@ -54,13 +56,15 @@ except ImportError:  # pragma: no cover
     from .commands import ALLOWED, Commands
     from .push import PushService
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
 PORT = int(os.environ.get("PORT", "8420"))
 # Running -> standby only shows once standby has lasted this long (hides the gap between part cycles).
 STANDBY_DELAY = float(os.environ.get("STANDBY_DELAY", "4"))
+# a bar change lasting longer than this sends a "taking long" notification (usually a failed bar load)
+BAR_CHANGE_ALERT = float(os.environ.get("BAR_CHANGE_ALERT", "180"))
 STATIC = Path(__file__).parent / "static"
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
@@ -88,6 +92,9 @@ def _connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS op_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, number INTEGER, text TEXT NOT NULL,
             started_at REAL NOT NULL, cleared_at REAL, demo INTEGER);
         CREATE INDEX IF NOT EXISTS op_messages_started ON op_messages(started_at DESC);
+        CREATE TABLE IF NOT EXISTS bar_changes (started_at REAL NOT NULL, ended_at REAL NOT NULL, duration_s REAL NOT NULL,
+            parts INTEGER, demo INTEGER);
+        CREATE INDEX IF NOT EXISTS bar_changes_started ON bar_changes(started_at DESC);
     """)
     cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
     if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
@@ -144,6 +151,8 @@ def track_state(now: float):
     state, detail, _ = effective_state(now)
     if state != meta.get("state"):
         log.info("State %s -> %s (%s)", meta.get("state"), state, detail)
+        if meta.get("state") == "running":
+            meta["running_ended_at"] = now      # for "only notify while running" (+ a short grace period)
         meta["state"] = state
         meta["state_since"] = now
         db.execute("INSERT INTO state_log(ts,state,detail) VALUES(?,?,?)", (now, state, detail))
@@ -252,6 +261,29 @@ def upsert_messages(messages: list[dict], now: float, demo: bool):
         log.info("MESSAGE %s %s", number, text)
 
 
+# ---- PC app updates: uploaded by push-to-github's download script, fetched by the PC app ----
+UPDATE_DIR = Path(DB_PATH).parent / "agent-update"
+
+
+def update_info() -> dict:
+    try:
+        return json.loads((UPDATE_DIR / "update.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def bar_change_stats(now: float) -> dict:
+    lt = time.localtime(now)
+    day_start = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    r = db.execute("SELECT COUNT(*) n, AVG(duration_s) avg FROM bar_changes WHERE started_at>=?", (day_start,)).fetchone()
+    last = db.execute("SELECT * FROM bar_changes ORDER BY started_at DESC LIMIT 1").fetchone()
+    week = db.execute("SELECT AVG(duration_s) avg FROM bar_changes WHERE started_at>=?", (now - 7 * 86400,)).fetchone()
+    return {"today": r["n"] or 0, "avg_today_s": round(r["avg"], 1) if r["avg"] else None,
+            "avg_week_s": round(week["avg"], 1) if week["avg"] else None,
+            "last_s": last["duration_s"] if last else None, "last_at": last["ended_at"] if last else None,
+            "alert_after_s": BAR_CHANGE_ALERT}
+
+
 def message_rows(active_only: bool, limit: int = 100) -> list[dict]:
     sql = "SELECT * FROM op_messages" + (" WHERE cleared_at IS NULL" if active_only else "") + \
           " ORDER BY started_at DESC LIMIT ?"
@@ -296,6 +328,21 @@ def ingest(snap: dict) -> dict:
             else:
                 since = meta.get("bar_change_since")
                 log.info("Bar change finished%s", f" after {now - since:.0f} s" if since else "")
+                if since and 1 <= now - since < 3600:
+                    db.execute("INSERT INTO bar_changes(started_at,ended_at,duration_s,parts,demo) VALUES(?,?,?,?,?)",
+                               (since, now, round(now - since, 1), snap.get("parts"), int(demo)))
+        # job complete: the count reaches the required count (counting up - not a reset or a new target)
+        req, parts, prev_parts = snap.get("parts_required"), snap.get("parts"), latest.get("parts")
+        if (req and parts is not None and prev_parts is not None and parts >= req > prev_parts
+                and parts - prev_parts <= 5 and latest.get("parts_required") == req):
+            meta["job_complete"] = {"at": now, "parts": parts, "required": req}
+            log.info("Job complete: %s/%s", parts, req)
+        # when the count first sat at exactly the required count (for "over producing")
+        if req and parts is not None and parts == req:
+            if meta.get("at_req") != [parts, req]:
+                meta["at_req"], meta["at_req_since"] = [parts, req], now
+        else:
+            meta.pop("at_req", None)
         if snap.get("state") == "running":
             meta["last_running"] = {"detail": snap.get("state_detail"), "cycle_started_at": snap.get("cycle_started_at"),
                                     "cycle_timer_s": snap.get("cycle_timer_s")}
@@ -333,6 +380,7 @@ def status() -> dict:
             "state": state,
             "state_detail": detail,
             "state_since": meta.get("state_since"),
+            "running_ended_at": meta.get("running_ended_at"),
             "agent_online": agent_online,
             "agent_last_seen": meta.get("last_seen"),
             "machine_connected": bool(latest.get("machine_connected")) and agent_online,
@@ -344,6 +392,16 @@ def status() -> dict:
             "cycle_timer_s": cyc_src.get("cycle_timer_s") if running else None,
             "cycle_started_at": cyc_src.get("cycle_started_at") if running else None,
             "eta_s": round(eta) if eta else None,
+            # when the job should finish (machine running, target set) - "done at 17:40"
+            "finish_at": round(now + eta) if (eta and state in ("running",)) else None,
+            "job_complete": meta.get("job_complete"),
+            "bar_changes": bar_change_stats(now),
+            # still running after reaching the required count (the work counter isn't stopping it)
+            "over_producing": bool(running and not bar_change and req and parts is not None
+                                   and (parts > req or (parts == req and latest.get("state") == "running"
+                                                        and now - (meta.get("at_req_since") or now) > 8))),
+            "agent_version": latest.get("agent_version"),
+            "agent_update": update_info().get("version"),
             "program": latest.get("program") or {},
             "paths": latest.get("paths") or [],
             "active_alarms": active if state != "off" else [],
@@ -600,6 +658,21 @@ class Handler(BaseHTTPRequestHandler):
                 before = float(qs["before"][0]) if qs.get("before") else None
                 active = (qs.get("active") or ["0"])[0].lower() in ("1", "true", "yes")
                 return self._json(alarm_history(limit, before, active))
+            if path == "/api/agent/update" and method == "PUT":
+                return self._receive_update(qs)
+            if path == "/api/agent/update" and method == "GET":
+                info = update_info()
+                return self._json({k: info.get(k) for k in ("version", "sha256", "size", "signature", "uploaded_at")})
+            if path == "/api/agent/update/download" and method == "GET":
+                f = UPDATE_DIR / "HanwhaMonitor.exe"
+                if not f.is_file():
+                    return self._json({"detail": "no update uploaded"}, 404)
+                return self._send_file(f, "application/octet-stream")
+            if method == "GET" and path == "/api/barchanges":
+                limit = max(1, min(1000, int((qs.get("limit") or ["200"])[0])))
+                with _lock:
+                    rows = db.execute("SELECT * FROM bar_changes ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+                return self._json({"bar_changes": [dict(r) for r in rows]})
             if method == "GET" and path == "/api/messages":
                 limit = max(1, min(500, int((qs.get("limit") or ["100"])[0])))
                 with _lock:
@@ -720,6 +793,50 @@ class Handler(BaseHTTPRequestHandler):
                 self._raw_body(1_000_000)
                 return self._json({"ok": True})
         return self._json({"detail": "not found"}, 404)
+
+    def _receive_update(self, qs):
+        import hashlib
+        version = (qs.get("version") or [""])[0].strip()
+        sig = (self.headers.get("X-Signature") or "").strip().lower()
+        if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
+            return self._json({"ok": False, "error": "version must look like 1.8.0"}, 400)
+        if not re.fullmatch(r"[0-9a-f]{128}", sig):
+            return self._json({"ok": False, "error": "missing or malformed X-Signature (the build's .sig file)"}, 400)
+        length = int(self.headers.get("Content-Length") or 0)
+        if not 100_000 < length < 300_000_000:
+            return self._json({"ok": False, "error": "expected the HanwhaMonitor.exe file"}, 400)
+        self._drained = True
+        UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = UPDATE_DIR / "upload.tmp"
+        h = hashlib.sha256()
+        left = length
+        with open(tmp, "wb") as out:
+            while left > 0:
+                chunk = self.rfile.read(min(1 << 20, left))
+                if not chunk:
+                    return self._json({"ok": False, "error": "upload cut short"}, 400)
+                out.write(chunk)
+                h.update(chunk)
+                left -= len(chunk)
+        os.replace(tmp, UPDATE_DIR / "HanwhaMonitor.exe")
+        info = {"version": version, "sha256": h.hexdigest(), "size": length, "signature": sig, "uploaded_at": time.time()}
+        (UPDATE_DIR / "update.json").write_text(json.dumps(info))
+        log.info("PC app update %s uploaded (%d KB)", version, length // 1024)
+        return self._json({"ok": True, **{k: info[k] for k in ("version", "sha256", "size")}})
+
+    def _send_file(self, path: Path, ctype: str):
+        size = path.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            with open(path, "rb") as f:
+                while chunk := f.read(1 << 20):
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def _hls_view(self, path: str):
         parts = path.split("/")          # ['', 'api', 'camera', 'hls', 'v', token, session, file]
