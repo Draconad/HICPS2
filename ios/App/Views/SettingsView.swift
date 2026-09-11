@@ -147,7 +147,7 @@ struct SettingsView: View {
                         LabeledContent("Machine", value: s.machineName)
                         LabeledContent("Monitor PC", value: s.agentOnline ? "Online" : "Offline")
                     }
-                    Text("Sideloaded with a free Apple ID? The app stops opening after 7 days until Sideloadly re-signs it — turn on Sideloadly's automatic refresh to avoid that.")
+                    Text("Sideloaded with a free Apple ID? The app stops opening after 7 days until it is re-signed. Refresh it with iLoader at least weekly.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

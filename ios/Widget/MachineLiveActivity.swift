@@ -11,7 +11,7 @@ struct MachineWidgetBundle: WidgetBundle {
 }
 
 /// A tiny home-screen widget whose only job is to prove the widget extension
-/// installed and runs. If "XE35 Monitor" shows up in the widget gallery, the
+/// installed and runs. If "HiCPS-2" shows up in the widget gallery, the
 /// same extension is available to draw the Live Activity.
 struct ExtensionCheckWidget: Widget {
     struct Entry: TimelineEntry { let date: Date }
@@ -30,7 +30,7 @@ struct ExtensionCheckWidget: Widget {
                 Image(systemName: "gauge.with.dots.needle.67percent")
                     .font(.title)
                     .foregroundStyle(MachineStateKind.running.color)
-                Text("XE35 Monitor").font(.headline)
+                Text("HiCPS-2").font(.headline)
                 Text("Widget extension OK")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -40,7 +40,7 @@ struct ExtensionCheckWidget: Widget {
             }
             .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("XE35 Monitor (test)")
+        .configurationDisplayName("HiCPS-2 (test)")
         .description("Shows that the monitor's widget extension is installed.")
         .supportedFamilies([.systemSmall])
     }

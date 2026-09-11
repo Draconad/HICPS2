@@ -105,7 +105,7 @@ final class LiveActivityManager: ObservableObject {
         }
         guard systemEnabled else {
             lastAttempt = "blocked by iOS"
-            lastError = "iOS isn't allowing Live Activities for this app. Check Settings › XE35 Monitor › Live Activities (and Settings › Face ID & Passcode › Live Activities on the Lock Screen)."
+            lastError = "iOS isn't allowing Live Activities for this app. Check Settings › HiCPS-2 › Live Activities (and Settings › Face ID & Passcode › Live Activities on the Lock Screen)."
             return
         }
         guard activity == nil else { lastAttempt = "already running"; return }

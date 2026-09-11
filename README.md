@@ -126,7 +126,7 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 2. Install `HanwhaMonitor-bN.ipa` with **iLoader** and your Apple ID.
    > **Don't use Sideloadly for this app.** Sideloadly signs the Live Activity extension in a way iOS rejects (`AMFI: … has entitlements but is not a main binary`). The app still runs, but the Live Activity, the Dynamic Island and widgets never appear. iLoader signs it correctly. RED-TOK's Dynamic Island has the same problem and the same fix.
 3. On the phone, go to **Settings → General → VPN & Device Management** → trust your Apple ID.
-4. Open **XE35 Monitor** → **Settings**:
+4. Open **HiCPS-2** → **Settings**:
    - Enter the server URL `http://<unraid-ip>:8420` → **Test connection**. Allow local network access when asked.
    - Allow notifications.
 5. The Live Activity starts on its own. Lock the phone to see it, or swipe home to see the Dynamic Island.
