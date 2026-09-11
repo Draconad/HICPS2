@@ -54,8 +54,8 @@ struct AlarmsView: View {
             List {
                 Section {
                     Picker("Show", selection: $filter) {
-                        Text("All").tag(0)
                         Text("Active").tag(1)
+                        Text("History").tag(0)
                     }
                     .pickerStyle(.segmented)
                     .listRowBackground(Color.clear)
