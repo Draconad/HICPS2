@@ -68,6 +68,27 @@ jobs:
           ls "$app/PlugIns" || { echo "::error::Live Activity extension missing"; status=1; }
           exit $status
 
+      # Ad-hoc sign the extension and the app before handing them to Sideloadly.
+      #
+      # The unsigned build had no _CodeSignature in the .appex, and after Sideloadly signed it
+      # the iPad refused to launch the Live Activity extension:
+      #   AMFI: constraint violation .../MachineWidget.appex/MachineWidget has entitlements but is not a main binary
+      #   chronod: Launched process exited during launch.
+      # Apple's codesign marks each bundle's executable as a main binary and seals its Info.plist,
+      # so Sideloadly starts from a properly structured, already-signed bundle.
+      - name: Ad-hoc sign bundles (inside out)
+        working-directory: ios
+        run: |
+          app="build/Build/Products/Release-iphoneos/HanwhaMonitor.app"
+          for appex in "$app"/PlugIns/*.appex; do
+            codesign --force --sign - --timestamp=none --generate-entitlement-der "$appex"
+          done
+          codesign --force --sign - --timestamp=none --generate-entitlement-der "$app"
+          for b in "$app"/PlugIns/*.appex "$app"; do
+            echo "== $b"; codesign -dvvv "$b" 2>&1 | grep -E "Identifier|Format|CodeDirectory|Runtime|flags" || true
+            ls "$b/_CodeSignature"
+          done
+
       - name: Package IPA
         working-directory: ios
         run: |
