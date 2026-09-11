@@ -152,6 +152,7 @@ struct CameraView: View {
                 if live.ready, let path = live.url, let url = api.absoluteURL(path) {
                     player.play(url: url, session: live.session ?? path)
                     player.updateLag(segment: live.segmentS ?? 2)
+                    player.restartIfStuck(url: url)
                 } else if !live.ready {
                     player.stop()
                 }
@@ -193,6 +194,9 @@ final class LivePlayer: ObservableObject {
     @Published private(set) var lag: Double?
     private var session: String?
     private var observation: NSKeyValueObservation?
+    private var attachedAt = Date()
+    private var lastProgress = Date()
+    private var lastTime: Double = -1
 
     init() {
         player.isMuted = true
@@ -209,6 +213,7 @@ final class LivePlayer: ObservableObject {
             return
         }
         self.session = session
+        attachedAt = Date(); lastProgress = Date(); lastTime = -1
         let item = AVPlayerItem(url: url)
         // stay ~3 chunks (about 6 s) behind live, like the dashboard: a late chunk then doesn't pause the picture
         item.automaticallyPreservesTimeOffsetFromLive = true
@@ -226,6 +231,19 @@ final class LivePlayer: ObservableObject {
         let now = CMTimeGetSeconds(item.currentTime())
         let value = edge - now + segment
         lag = (value.isFinite && value > 0 && value < 120) ? value : nil
+    }
+
+    /// Watchdog: if the picture hasn't moved for a while (or the item failed), load the video again from scratch.
+    func restartIfStuck(url: URL) {
+        guard hasItem, let item = player.currentItem, let current = session else { return }
+        let t = CMTimeGetSeconds(item.currentTime())
+        if t.isFinite && t != lastTime { lastTime = t; lastProgress = Date() }
+        let stuck = Date().timeIntervalSince(lastProgress)
+        let age = Date().timeIntervalSince(attachedAt)
+        if item.status == .failed || (age > 12 && stuck > 6) {
+            self.session = nil
+            play(url: url, session: current)
+        }
     }
 
     func stop() {

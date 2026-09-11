@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover
     from .camera import MAX_FRAME, Camera, LiveVideo
     from .push import PushService
 
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))

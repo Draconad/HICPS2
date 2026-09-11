@@ -144,17 +144,21 @@ class CameraRelay:
         ff = find_ffmpeg(self.cfg)
         if not ff:
             return None
-        if self.cfg.camera_transcode:   # only if the camera's own video won't play (e.g. H.265)
+        if self.cfg.camera_transcode:   # H.265 cameras, or cameras whose own frame timing stutters
             kbps = 1500 if self.cfg.camera_hd else 600
+            # fps=15 makes the frame timing perfectly even (frames the camera stamps late are evened out)
             video = ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
-                     "-g", "30", "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps}k",
-                     "-vf", f"scale='min({MAX_WIDTH},iw)':-2"]
+                     "-g", str(15 * HLS_SEGMENT), "-keyint_min", str(15 * HLS_SEGMENT), "-sc_threshold", "0",
+                     "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k",
+                     "-vf", f"fps=15,scale='min({MAX_WIDTH},iw)':-2"]
         else:
             video = ["-c:v", "copy"]
         push = f"{self.server}/api/camera/hls/push/{session}/live.m3u8"
         headers = ["-headers", f"X-API-Key: {self.cfg.api_key}\r\n"] if self.cfg.api_key else []
-        return ([ff, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "8000000",
-                 "-i", camera_url(self.cfg),
+        # camera timestamps that jump (some Tapo firmware) leave holes players stall on: use arrival time instead
+        retime = ["-use_wallclock_as_timestamps", "1", "-fflags", "+genpts"] if self.cfg.camera_retime else []
+        return ([ff, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "8000000"] + retime +
+                ["-i", camera_url(self.cfg),
                  "-map", "0:v:0", "-an"] + video +
                 ["-f", "hls", "-hls_time", str(HLS_SEGMENT), "-hls_list_size", "8",
                  "-hls_flags", "delete_segments+independent_segments",
@@ -316,3 +320,81 @@ class CameraRelay:
         if s >= 0 and e > s:
             return out[s:e + 2], ""
         return None, _explain(_redact(p.stderr.decode("utf-8", "replace")))
+
+    # ------------------------------------------------------------------ video timing check (GUI button)
+    def check_timing(self, seconds: int = 10) -> str:
+        """Record `seconds` of the camera's stream (no re-encoding) and report how evenly the frames are
+        timestamped by the camera and how evenly they arrive over the network. Finds the cause of stutter."""
+        ff = find_ffmpeg(self.cfg)
+        if not ff:
+            return "ffmpeg.exe not found - put it next to HanwhaMonitor.exe."
+        cmd = [ff, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "8000000",
+               "-i", camera_url(self.cfg), "-t", str(seconds), "-map", "0:v:0", "-c", "copy",
+               "-flush_packets", "1", "-f", "framecrc", "pipe:1"]
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    creationflags=NO_WINDOW, bufsize=0)
+        except OSError as e:
+            return f"Couldn't start ffmpeg: {e}"
+        tb = 1 / 90000
+        pts: list[float] = []
+        arrived: list[float] = []
+        keys: list[int] = []
+        deadline = time.time() + seconds + 25
+        for raw in iter(proc.stdout.readline, b""):
+            line = raw.decode("ascii", "replace").strip()
+            if time.time() > deadline:
+                break
+            if line.startswith("#tb"):
+                try:
+                    num, den = line.split(":", 1)[1].strip().split("/")
+                    tb = int(num) / int(den)
+                except ValueError:
+                    pass
+                continue
+            if not line or line.startswith("#"):
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            try:
+                pts.append(int(parts[2]) * tb)
+            except (IndexError, ValueError):
+                continue
+            arrived.append(time.time())
+            flags = [p for p in parts[6:] if p.startswith("F=")]   # framecrc prints F= only when not a plain keyframe
+            if not flags or int(flags[0][2:], 16) & 1:
+                keys.append(len(pts) - 1)
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        err = proc.stderr.read().decode("utf-8", "replace")
+        if len(pts) < 10:
+            return "Couldn't read the video: " + _explain(_redact(err))
+        return summarise_timing(pts, arrived, keys)
+
+
+def summarise_timing(pts: list[float], arrived: list[float], keys: list[int]) -> str:
+    """Plain-English verdict on camera timestamps (content) vs arrival (network)."""
+    order = sorted(pts)
+    ts_gaps = [b - a for a, b in zip(order, order[1:]) if b > a]
+    ar_gaps = [b - a for a, b in zip(arrived, arrived[1:])]
+    dur = order[-1] - order[0]
+    fps = (len(order) - 1) / dur if dur > 0 else 0
+    typ = sorted(ts_gaps)[len(ts_gaps) // 2] if ts_gaps else 0          # median frame interval
+    ts_jumps = [g for g in ts_gaps if typ and g > 2.5 * typ]
+    ar_late = [g for g in ar_gaps if g > max(0.25, 4 * typ)]
+    key_every = (sum(b - a for a, b in zip(keys, keys[1:])) / (len(keys) - 1) / fps) if len(keys) > 1 and fps else None
+    lines = [f"{len(order)} frames in {dur:.1f} s = {fps:.1f} fps"
+             + (f", keyframe every {key_every:.1f} s" if key_every else "") + ".",
+             f"Camera timestamps: frames {typ * 1000:.0f} ms apart, biggest gap {max(ts_gaps) * 1000:.0f} ms"
+             f" ({len(ts_jumps)} jumps).",
+             f"Network arrival: biggest delay {max(ar_gaps) * 1000:.0f} ms ({len(ar_late)} late bursts)."]
+    if ts_jumps and len(ts_jumps) >= max(2, dur / 3):
+        lines.append("Verdict: the camera's own timestamps jump - tick 'Fix camera timing' (and if it still isn't "
+                     "smooth, also 'Re-encode the video').")
+    elif len(ar_late) >= max(2, dur / 3):
+        lines.append("Verdict: the video arrives in bursts from the camera (Wi-Fi) - the player buffer should hide "
+                     "this; if it still stutters, check the camera's Wi-Fi signal.")
+    else:
+        lines.append("Verdict: the camera's video looks smooth and arrives evenly.")
+    return "\n".join(lines)

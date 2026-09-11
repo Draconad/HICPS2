@@ -144,7 +144,12 @@ The PC app reads the camera on the machine's network and sends it to the server.
 
 **Data use:** SD video is roughly 0.3-0.6 Mbit/s, HD roughly 1.5-2.5 Mbit/s, and only while someone is watching. It stops about 20 s after the last viewer leaves.
 
-If the video never starts but stills work, the camera may be sending H.265. Tick **Re-encode the video** in the Camera tab. That converts it on the PC and uses more CPU there.
+**If the video stutters:** click **Check video timing** in the PC app's Camera tab. It records 10 s straight from the camera and says what's wrong:
+- **The camera's own timestamps jump.** Some Tapo firmware does this, and it shows as a pause every second or a picture that goes black. Tick **Fix camera timing**. It re-stamps each frame with its arrival time and uses no extra CPU. If it still isn't perfectly smooth, also tick **Re-encode the video**. That gives perfectly even frames but uses some CPU on the PC.
+- **The video arrives in bursts.** This is Wi-Fi, and the player buffer normally hides it. If you still see it, improve the camera's Wi-Fi signal.
+
+If the video never starts but stills work, the camera may be sending H.265. Tick **Re-encode the video**.
+The dashboard and the app restart the video by themselves if the picture ever freezes. Hover over the LIVE badge on the dashboard to see how evenly the video is arriving.
 
 **If the camera test fails:**
 - **"rejected the username/password":** use the Camera Account from step 1, not your TP-Link account.

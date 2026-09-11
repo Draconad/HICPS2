@@ -383,9 +383,14 @@ class App:
         ttk.Checkbutton(page, text="HD stream (sharper, about 4x the data - SD is fine for a glance)",
                         variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(8, 0))
         r += 1
+        var = tk.BooleanVar(value=self.cfg.camera_retime)
+        self.vars["camera_retime"] = var
+        ttk.Checkbutton(page, text="Fix camera timing (if the video stutters - see Check video timing)",
+                        variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        r += 1
         var = tk.BooleanVar(value=self.cfg.camera_transcode)
         self.vars["camera_transcode"] = var
-        ttk.Checkbutton(page, text="Re-encode the video (only if it won't play - uses more CPU on this PC)",
+        ttk.Checkbutton(page, text="Re-encode the video (smoothest / H.265 cameras - uses more CPU on this PC)",
                         variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
         r += 1
         ttk.Label(page, text="Live video streams only while someone is watching; otherwise a still is sent every minute.",
@@ -396,6 +401,8 @@ class App:
         ttk.Button(btns, text="Save & apply", style="Accent.TButton", command=self.apply_settings).pack(side="left")
         self.cam_test_btn = ttk.Button(btns, text="Test camera", command=self._test_camera)
         self.cam_test_btn.pack(side="left", padx=8)
+        self.cam_timing_btn = ttk.Button(btns, text="Check video timing", command=self._check_timing)
+        self.cam_timing_btn.pack(side="left")
         r += 1
         self.cam_status = ttk.Label(page, text="", style="Hint.TLabel", wraplength=540, justify="left")
         self.cam_status.grid(row=r, column=0, columnspan=2, sticky="w")
@@ -447,6 +454,32 @@ class App:
                     self._show_preview(jpg)
                 else:
                     self.cam_status.configure(text=f"Camera test failed: {err}")
+            self.root.after(0, done)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _check_timing(self):
+        from dataclasses import replace
+        form = {}
+        for key, var in self.vars.items():
+            cur = getattr(self.cfg, key)
+            try:
+                v = var.get()
+                form[key] = bool(v) if isinstance(cur, bool) else int(v) if isinstance(cur, int) else \
+                    float(v) if isinstance(cur, float) else str(v).strip()
+            except (ValueError, tk.TclError):
+                pass
+        test_cfg = replace(self.cfg, **form)
+        self.cam_timing_btn.configure(state="disabled")
+        self.cam_status.configure(text="Recording 10 seconds of video from the camera…")
+        self._cam_msg_until = time.time() + 60
+
+        def run():
+            result = CameraRelay(test_cfg).check_timing(10)
+            log.info("Camera video timing:\n%s", result)
+            def done():
+                self.cam_timing_btn.configure(state="normal")
+                self.cam_status.configure(text=result)
+                self._cam_msg_until = time.time() + 120
             self.root.after(0, done)
         threading.Thread(target=run, daemon=True).start()
 

@@ -190,6 +190,7 @@ fetch("auth/info").then(r => r.json()).then(i => {
 // The PC only streams while someone is watching, so it takes a couple of seconds to begin.
 const HLS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js";
 let camVisible = false, camUrl = null, hls = null, camPoll = null, stillTimer = null, camPlaying = false, noPlayer = false;
+let attachedAt = 0, lastProgress = 0, lastTime = -1, mediaRecoveries = 0;
 const vid = $("camvid"), still = $("camimg");
 function loadScript(src) {
   return new Promise(res => { const el = document.createElement("script"); el.src = src;
@@ -208,6 +209,7 @@ function camDetach() {
 async function camAttach(url) {
   camDetach();
   camUrl = url;
+  attachedAt = lastProgress = Date.now(); lastTime = -1; mediaRecoveries = 0;
   if (vid.canPlayType("application/vnd.apple.mpegurl")) {        // Safari / iPhone / iPad: native HLS
     vid.src = url;
   } else {
@@ -216,8 +218,14 @@ async function camAttach(url) {
     if (noPlayer || camUrl !== url) { camBadge(); return; }
     // stay ~3 chunks behind live: a little more delay, but a late chunk no longer pauses the picture
     hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 8, maxLiveSyncPlaybackRate: 1.1,
-                    backBufferLength: 10, lowLatencyMode: false });
-    hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { camDetach(); } });   // the next poll re-attaches
+                    backBufferLength: 10, lowLatencyMode: false,
+                    maxBufferHole: 0.6, nudgeMaxRetry: 10 });   // step over small gaps in the camera's video
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal) return;
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries++ < 2) { hls.recoverMediaError(); return; }
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
+      camDetach();                                                          // the next poll re-attaches
+    });
     hls.loadSource(url);
     hls.attachMedia(vid);
   }
@@ -225,6 +233,19 @@ async function camAttach(url) {
 }
 vid.addEventListener("playing", () => { camPlaying = true; vid.hidden = false; $("camwait").hidden = true; camBadge(); });
 vid.addEventListener("waiting", () => { camPlaying = false; camBadge(); });
+vid.addEventListener("timeupdate", () => {
+  if (vid.currentTime !== lastTime) { lastTime = vid.currentTime; lastProgress = Date.now(); }
+});
+// Watchdog: if the picture hasn't moved for a while (stalled / black), start the video again from scratch
+function camWatchdog() {
+  if (!camUrl || !camInfo || !camInfo.ready || !camInfo.url) return;
+  const stuck = Date.now() - lastProgress, age = Date.now() - attachedAt;
+  if ((age > 12000 && stuck > 6000) || (!camPlaying && age > 15000 && stuck > 10000)) {
+    console.log("camera: video stuck for", stuck, "ms - restarting it");
+    vid.hidden = true;                      // show the still rather than a black box while it restarts
+    camAttach(camInfo.url);
+  }
+}
 function refreshStill() {
   if (!camPlaying) still.src = "api/camera/frame.jpg" + (q ? q + "&" : "?") + "t=" + Date.now();
 }
@@ -263,7 +284,7 @@ async function camTick() {
     camInfo = await getJSON("api/camera/live" + q);        // also tells the server someone is watching
     if (camInfo.ready && camInfo.url) {
       const same = camUrl && camUrl.split("/").slice(-2, -1)[0] === camInfo.session;
-      if (!same) camAttach(camInfo.url);
+      if (!same) camAttach(camInfo.url); else camWatchdog();
     } else if (camUrl && !camInfo.ready) {
       camDetach();
     }

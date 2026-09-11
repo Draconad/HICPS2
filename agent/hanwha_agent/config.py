@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "HanwhaMonitor"
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 
 
 def normalize_url(url: str) -> str:
@@ -51,7 +51,8 @@ class Config:
     camera_password: str = ""
     camera_hd: bool = False           # False = stream2 (low res, light on the network), True = stream1 (HD)
     camera_fps: float = 4.0           # (no longer used - live video runs at the camera's own frame rate)
-    camera_transcode: bool = False    # re-encode to H.264 (only if the camera's own video won't play)
+    camera_transcode: bool = False    # re-encode to H.264 (H.265 cameras, or for perfectly even frames)
+    camera_retime: bool = False       # stamp frames with their arrival time (fixes cameras with jumpy timestamps)
     ffmpeg_path: str = ""             # blank = ffmpeg.exe next to the .exe, or on PATH     # PMC bit / macro var that is on when "stop at required count" is enabled, e.g. K5.3
     server_url: str = "http://tower.local:8420"
     api_key: str = ""
