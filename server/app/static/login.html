@@ -32,6 +32,9 @@
   .note { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
   .note.warn { color: #ff9f0a; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  label.check { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-weight: 500;
+                font-size: 13px; color: var(--ink); margin-top: 12px; cursor: pointer; }
+  label.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
   .links { margin-top: 16px; text-align: center; font-size: 13px; }
   .links a { color: var(--muted); }
 </style>
@@ -52,7 +55,9 @@
       <label for="k">API key</label>
       <input id="k" name="api_key" type="password" autocomplete="off" spellcheck="false">
       <div class="hint">The API_KEY set on the Docker container.</div>
+      <label class="check"><input type="checkbox" id="rk" checked> Remember the API key on this browser</label>
     </div>
+    <div class="hint" id="trusted" hidden>This browser is already trusted with the API key.</div>
     <button id="lbtn">Log in</button>
     <div class="msg" id="lmsg"></div>
   </form>
@@ -101,7 +106,8 @@ function showChange(info, first) {
 async function init() {
   let info = {};
   try { info = await (await fetch("auth/info")).json(); } catch (e) {}
-  $("keyrow").hidden = !info.api_key_required;
+  $("keyrow").hidden = !info.api_key_needed;
+  $("trusted").hidden = !info.device_trusted;
   if (info.logged_in && info.must_change) return showChange(info, true);
   if (info.logged_in && wantChange) return showChange(info, false);
   if (info.logged_in) return location.replace("./");
@@ -112,7 +118,8 @@ async function init() {
 $("login").onsubmit = async e => {
   e.preventDefault();
   $("lbtn").disabled = true; $("lmsg").textContent = "";
-  const r = await post("auth/login", { username: $("u").value, password: $("p").value, api_key: $("k").value });
+  const r = await post("auth/login", { username: $("u").value, password: $("p").value,
+                                        api_key: $("k").value, remember_key: $("rk").checked });
   $("lbtn").disabled = false;
   if (!r.ok) { $("lmsg").textContent = r.error || "Couldn't log in."; return; }
   typedPassword = $("p").value;

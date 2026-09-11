@@ -87,7 +87,7 @@
   </table></div>
   <div class="footrow">
     <p class="sub" id="foot"></p>
-    <p class="sub"><span id="who"></span> &middot; <a href="login?change=1">Change login</a> &middot; <a href="#" id="logout">Log out</a></p>
+    <p class="sub"><span id="who"></span> &middot; <a href="login?change=1">Change login</a> &middot; <a href="#" id="logout">Log out</a><span id="forget" hidden> &middot; <a href="#" id="forgetlink" title="Log out and ask for the API key again next time">Log out &amp; forget this browser</a></span></p>
   </div>
 </main>
 <script>
@@ -153,13 +153,16 @@ $("cleardemo").onclick = async () => {
   } catch (e) { alert("Couldn't clear demo alarms: " + e.message); }
   btn.disabled = false;
 };
-$("logout").onclick = async e => {
-  e.preventDefault();
-  await fetch("auth/logout", { method: "POST" }).catch(() => {});
+async function logout(forget) {
+  await fetch("auth/logout", { method: "POST", headers: { "Content-Type": "application/json" },
+                               body: JSON.stringify({ forget_device: forget }) }).catch(() => {});
   location.replace("login");
-};
+}
+$("logout").onclick = e => { e.preventDefault(); logout(false); };
+$("forgetlink").onclick = e => { e.preventDefault(); logout(true); };
 fetch("auth/info").then(r => r.json()).then(i => {
-  $("openapi").hidden = !!i.api_key_required;
+  $("openapi").hidden = !!i.api_key_set;
+  $("forget").hidden = !i.device_trusted;
   $("who").textContent = i.username ? `Logged in as ${i.username}` : "";
 }).catch(() => {});
 const tick = () => status().catch(e => $("detail").textContent = "Can't reach server: " + e);

@@ -36,14 +36,14 @@ from urllib.parse import parse_qs, urlparse
 
 try:  # works both as "python app/server.py" and as a package import
     from apns import APNs
-    from auth import COOKIE, SESSION_DAYS, Auth
+    from auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
     from push import PushService
 except ImportError:  # pragma: no cover
     from .apns import APNs
-    from .auth import COOKIE, SESSION_DAYS, Auth
+    from .auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
     from .push import PushService
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -391,7 +391,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("X-Frame-Options", "DENY")
         for k, v in (headers or {}).items():
-            self.send_header(k, v)
+            for item in (v if isinstance(v, list) else [v]):   # several Set-Cookie headers
+                self.send_header(k, item)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -402,12 +403,18 @@ class Handler(BaseHTTPRequestHandler):
     def _redirect(self, where: str):
         self._send(302, b"", "text/plain", {"Location": where})
 
-    def _token(self) -> str | None:
+    def _cookie(self, name: str) -> str | None:
         try:
             c = SimpleCookie(self.headers.get("Cookie") or "")
-            return c[COOKIE].value if COOKIE in c else None
+            return c[name].value if name in c else None
         except Exception:
             return None
+
+    def _token(self) -> str | None:
+        return self._cookie(COOKIE)
+
+    def _device_trusted(self) -> bool:
+        return bool(API_KEY) and auth.device_ok(self._cookie(DEVICE_COOKIE), auth.key_fingerprint(API_KEY))
 
     def _session(self) -> dict | None:
         return auth.session(self._token())
@@ -446,17 +453,25 @@ class Handler(BaseHTTPRequestHandler):
             return False
         s = self._session()
         if method == "GET" and path == "/auth/info":
-            self._json({"api_key_required": bool(API_KEY), "logged_in": bool(s),
+            trusted = self._device_trusted()
+            self._json({"api_key_set": bool(API_KEY),                        # the data API is protected
+                        "api_key_needed": bool(API_KEY) and not trusted,     # this browser must type it at login
+                        "device_trusted": trusted, "logged_in": bool(s),
                         "must_change": bool(s and s["must_change"]), "username": s["username"] if s else None})
         elif method == "POST" and path == "/auth/login":
             b = self._body()
-            key_ok = self._key_ok(str(b.get("api_key") or "")) if API_KEY else True
+            typed_key = str(b.get("api_key") or "")
+            trusted = self._device_trusted()
+            key_ok = (trusted or self._key_ok(typed_key)) if API_KEY else True
             token, err = auth.login(str(b.get("username") or ""), str(b.get("password") or ""), self._client_ip(), key_ok)
             if not token:
                 self._json({"ok": False, "error": err}, 401)
             else:
-                cookie = f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"
-                self._json({"ok": True, "must_change": auth.session(token)["must_change"]}, 200, {"Set-Cookie": cookie})
+                cookies = [f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_DAYS * 86400}"]
+                if API_KEY and not trusted and b.get("remember_key", True) and self._key_ok(typed_key):
+                    dev = auth.trust_device(auth.key_fingerprint(API_KEY), self._client_ip())
+                    cookies.append(f"{DEVICE_COOKIE}={dev}; Path=/; HttpOnly; SameSite=Lax; Max-Age={DEVICE_DAYS * 86400}")
+                self._json({"ok": True, "must_change": auth.session(token)["must_change"]}, 200, {"Set-Cookie": cookies})
         elif method == "POST" and path == "/auth/change":
             if not s:
                 self._json({"ok": False, "error": "Please log in again."}, 401)
@@ -467,7 +482,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": not err, "error": err}, 200 if not err else 400)
         elif method == "POST" and path == "/auth/logout":
             auth.logout(self._token())
-            self._json({"ok": True}, 200, {"Set-Cookie": f"{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"})
+            cookies = [f"{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"]
+            if self._body().get("forget_device"):
+                auth.forget_device(self._cookie(DEVICE_COOKIE))
+                cookies.append(f"{DEVICE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
+            self._json({"ok": True}, 200, {"Set-Cookie": cookies})
         else:
             self._json({"detail": "not found"}, 404)
         return True

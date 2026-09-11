@@ -76,6 +76,7 @@ To update after a new build, use **Force update** on the container. Unraid's "up
 **Check it:** open `http://<unraid-ip>:8420/`. You'll get a login page:
 - The first login is **admin / admin**. You then have to choose your own username and password (at least 8 characters).
 - If `API_KEY` is set on the container, the login page also asks for it. You don't need `?key=` in the address any more.
+- **Remember the API key on this browser** (ticked by default) makes that browser trusted for a year, so later logins only need the username and password. The key itself isn't stored in the browser, only a random token. Changing `API_KEY` on the container forgets every trusted browser. **Log out & forget this browser**, at the bottom of the dashboard, forgets just the one you're using.
 - You then see the dashboard showing "Waiting for the monitor PC". **Change login** and **Log out** are at the bottom of the page.
 - A browser stays logged in for 30 days. Changing the login signs out every other browser.
 - **Forgotten the login?** Set `RESET_LOGIN=true` on the container and restart. The login goes back to admin / admin. Then remove `RESET_LOGIN`, otherwise the login resets on every restart.

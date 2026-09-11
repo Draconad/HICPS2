@@ -15,7 +15,9 @@ import time
 log = logging.getLogger("hanwha-server.auth")
 
 COOKIE = "hm_session"
+DEVICE_COOKIE = "hm_device"   # "this browser already proved it knows the API key"
 SESSION_DAYS = 30
+DEVICE_DAYS = 365
 ITERATIONS = 240_000
 MAX_FAILS = 5            # per client address...
 FAIL_WINDOW = 5 * 60     # ...within this many seconds, then locked out for the rest of the window
@@ -41,6 +43,8 @@ class Auth:
                     updated REAL);
                 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, created REAL NOT NULL,
                     expires REAL NOT NULL, ip TEXT);
+                CREATE TABLE IF NOT EXISTS trusted_devices (id TEXT PRIMARY KEY, key_fp TEXT NOT NULL, created REAL NOT NULL,
+                    expires REAL NOT NULL, last_used REAL, ip TEXT);
             """)
             row = db.execute("SELECT id FROM auth_user WHERE id=1").fetchone()
             if row is None or reset:
@@ -49,6 +53,7 @@ class Auth:
                 log.warning("Web login %s: admin / admin (you'll be asked to change it on first login)",
                             "reset" if row is not None else "created")
             db.execute("DELETE FROM sessions WHERE expires < ?", (time.time(),))
+            db.execute("DELETE FROM trusted_devices WHERE expires < ?", (time.time(),))
 
     # ------------------------------------------------------------------ user
     def _set_locked(self, username: str, password: str, must_change: bool):
@@ -83,6 +88,38 @@ class Auth:
     def _failed(self, ip: str):
         with self._fails_lock:
             self._fails.setdefault(ip, []).append(time.time())
+
+    # ------------------------------------------------------------------ trusted browsers
+    @staticmethod
+    def key_fingerprint(api_key: str) -> str:
+        """Ties a trusted browser to the current API key: changing API_KEY forgets every browser."""
+        return hashlib.sha256(b"hm-device:" + api_key.encode()).hexdigest()
+
+    def trust_device(self, key_fp: str, ip: str) -> str:
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        with self.lock:
+            self.db.execute("INSERT INTO trusted_devices(id,key_fp,created,expires,last_used,ip) VALUES(?,?,?,?,?,?)",
+                            (_token_id(token), key_fp, now, now + DEVICE_DAYS * 86400, now, ip))
+        return token
+
+    def device_ok(self, token: str | None, key_fp: str) -> bool:
+        if not token:
+            return False
+        with self.lock:
+            d = self.db.execute("SELECT * FROM trusted_devices WHERE id=?", (_token_id(token),)).fetchone()
+            if d is None:
+                return False
+            if d["expires"] < time.time() or not hmac.compare_digest(d["key_fp"], key_fp):
+                self.db.execute("DELETE FROM trusted_devices WHERE id=?", (d["id"],))
+                return False
+            self.db.execute("UPDATE trusted_devices SET last_used=? WHERE id=?", (time.time(), d["id"]))
+        return True
+
+    def forget_device(self, token: str | None):
+        if token:
+            with self.lock:
+                self.db.execute("DELETE FROM trusted_devices WHERE id=?", (_token_id(token),))
 
     # ------------------------------------------------------------------ sessions
     def login(self, username: str, password: str, ip: str, extra_ok: bool = True) -> tuple[str | None, str]:
