@@ -212,6 +212,7 @@ class App:
         page = tk.Frame(nb, bg=BG, padx=6, pady=8)
         page.columnconfigure((0, 1), weight=1, uniform="v")
         f, self.parts_v, self.parts_sub = self._value_card(page, "PART COUNT", 0, 0)
+        self.parts_sub.configure(justify="left")
         self.parts_bar = ttk.Progressbar(f, style="Parts.Horizontal.TProgressbar", maximum=100)
         self.parts_bar.pack(fill="x", pady=(4, 0))
         _, self.cycle_v, self.cycle_sub = self._value_card(page, "CYCLE TIME", 0, 1)
@@ -493,9 +494,10 @@ class App:
                 sub.append(f"{left} to go · done in ~{fmt_duration(left * snap['last_cycle_s'])}")
             if snap.get("parts_total") is not None:
                 sub.append(f"Total {snap['parts_total']}")
+            text = "   ".join(sub)
             if snap.get("work_counter") is not None:
-                sub.append("Stops at count" if snap["work_counter"] else "Won't stop at count")
-            self.parts_sub.configure(text="   ".join(sub))
+                text += "\n" + ("■ Stops at count" if snap["work_counter"] else "∞ Won't stop at count")
+            self.parts_sub.configure(text=text)
 
         self.cycle_v.configure(text=fmt_duration(snap.get("last_cycle_s")))
         cur = snap.get("cycle_timer_s")
