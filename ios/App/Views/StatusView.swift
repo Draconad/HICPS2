@@ -124,8 +124,9 @@ struct PartsCard: View {
             }
             if let text = remainingText {
                 Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.primary.opacity(0.85))
             }
             if let on = s.workCounter {
                 Label(on ? "Stops at count" : "Won't stop at count",

@@ -35,10 +35,17 @@ struct MachineLiveActivity: Widget {
                         .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(s.partsText)
-                        .font(.headline.monospacedDigit())
-                        .foregroundStyle(.white)
-                        .padding(.trailing, 4)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(s.partsText)
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(.white)
+                        if let left = s.remaining {
+                            Text(left == 0 ? "done" : "\(left) to go")
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                    }
+                    .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -164,8 +171,16 @@ struct LockScreenView: View {
                 }
 
                 if s.required != nil {
-                    ProgressView(value: s.progress)
-                        .tint(color)
+                    VStack(alignment: .leading, spacing: 3) {
+                        ProgressView(value: s.progress)
+                            .tint(color)
+                        if let text = s.remainingText {
+                            Text(text)
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                        }
+                    }
                 }
 
                 if !s.alarms.isEmpty && !stale {

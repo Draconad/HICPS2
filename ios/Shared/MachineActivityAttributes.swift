@@ -78,6 +78,20 @@ struct MachineActivityAttributes: ActivityAttributes {
             return min(1, Double(p) / Double(r))
         }
 
+        var remaining: Int? {
+            guard let p = parts, let r = required, r > 0 else { return nil }
+            return max(0, r - p)
+        }
+
+        /// "382 to go · ~2h 20m" (estimate from the last cycle time), "Target reached", or nil with no target
+        var remainingText: String? {
+            guard let left = remaining else { return nil }
+            if left == 0 { return "Target reached" }
+            var t = "\(left) to go"
+            if let c = lastCycle, c > 0 { t += " · ~" + Fmt.span(Double(left) * c) }
+            return t
+        }
+
         var partsText: String {
             guard let p = parts else { return "—" }
             if let r = required, r > 0 { return "\(p)/\(r)" }
