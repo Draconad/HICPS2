@@ -11,6 +11,7 @@ import webbrowser
 from datetime import datetime
 from tkinter import messagebox, ttk
 
+from .camera import CameraRelay
 from .collector import Collector
 from . import signals
 from .focas import FocasMachine, MockMachine, parse_signal
@@ -29,6 +30,12 @@ INK = "#f2f2f2"
 MUTED = "#8e8e93"
 HEADER = "#000000"
 ACCENT = "#f47521"     # Hanwha orange
+
+try:  # camera preview
+    import io
+    from PIL import Image as PILImage, ImageTk
+except Exception:  # pragma: no cover
+    ImageTk = None
 
 try:  # optional system tray support
     import pystray
@@ -74,6 +81,7 @@ class App:
         self.cfg = cfg
         self.collector: Collector | None = None
         self.uploader: Uploader | None = None
+        self.camera: CameraRelay | None = None
         self.log_q: queue.Queue = queue.Queue(maxsize=2000)
         h = QueueLogHandler(self.log_q)
         h.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s", "%H:%M:%S"))
@@ -227,6 +235,7 @@ class App:
         nb.add(self._build_overview(nb), text="Overview")
         nb.add(self._build_settings(nb), text="Settings")
         nb.add(self._build_log(nb), text="Log")
+        nb.add(self._build_camera(nb), text="Camera")
         nb.add(self._build_signals(nb), text="Signal finder")
 
         foot = tk.Frame(self.root, bg=BG)
@@ -345,6 +354,112 @@ class App:
         self.log_text.configure(state="disabled")
         return page
 
+    def _build_camera(self, nb):
+        page = tk.Frame(nb, bg=BG, padx=12, pady=10)
+        page.columnconfigure(1, weight=1)
+        r = 0
+        var = tk.BooleanVar(value=self.cfg.camera_enabled)
+        self.vars["camera_enabled"] = var
+        ttk.Checkbutton(page, text="Send the camera to the dashboard and iPhone app", variable=var).grid(
+            row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        for key, label, hint in (
+                ("camera_address", "Camera IP address", "Tapo app: camera > Settings > Device Info, e.g. 192.168.11.15"),
+                ("camera_user", "Camera username", "Tapo app: camera > Settings > Advanced Settings > Camera Account"),
+                ("camera_password", "Camera password", ""),
+                ("camera_fps", "Frames per second", "While someone is watching (1-10). A still is sent every minute otherwise."),
+                ("ffmpeg_path", "ffmpeg.exe", "Leave blank if ffmpeg.exe is next to HanwhaMonitor.exe")):
+            ttk.Label(page, text=label, style="Form.TLabel").grid(row=r, column=0, sticky="w", pady=(6, 0), padx=(0, 10))
+            v = tk.StringVar(value=str(getattr(self.cfg, key)))
+            self.vars[key] = v
+            ttk.Entry(page, textvariable=v, show="•" if key == "camera_password" else "").grid(
+                row=r, column=1, sticky="ew", pady=(6, 0))
+            r += 1
+            if hint:
+                ttk.Label(page, text=hint, style="Hint.TLabel").grid(row=r, column=1, sticky="w")
+                r += 1
+        var = tk.BooleanVar(value=self.cfg.camera_hd)
+        self.vars["camera_hd"] = var
+        ttk.Checkbutton(page, text="HD stream (sharper, about 4x the data - SD is fine for a glance)",
+                        variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        r += 1
+        btns = tk.Frame(page, bg=BG)
+        btns.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 6))
+        ttk.Button(btns, text="Save & apply", style="Accent.TButton", command=self.apply_settings).pack(side="left")
+        self.cam_test_btn = ttk.Button(btns, text="Test camera", command=self._test_camera)
+        self.cam_test_btn.pack(side="left", padx=8)
+        r += 1
+        self.cam_status = ttk.Label(page, text="", style="Hint.TLabel", wraplength=540, justify="left")
+        self.cam_status.grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        self.cam_preview = tk.Label(page, bg="#0a0a0a", fg=MUTED, text="No image yet", height=12)
+        self.cam_preview.grid(row=r, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+        page.rowconfigure(r, weight=1)
+        self._cam_img = None
+        self._cam_shown_at = None
+        self._cam_msg_until = 0.0   # keep a test result on screen for a while
+        return page
+
+    def _show_preview(self, jpg: bytes):
+        if not ImageTk:
+            self.cam_preview.configure(text=f"Image received ({len(jpg) // 1024} KB) - preview unavailable")
+            return
+        try:
+            im = PILImage.open(io.BytesIO(jpg))
+            w = max(200, self.cam_preview.winfo_width() - 4)
+            h = max(120, self.cam_preview.winfo_height() - 4)
+            im.thumbnail((w, h))
+            self._cam_img = ImageTk.PhotoImage(im)
+            self.cam_preview.configure(image=self._cam_img, text="", height=0)
+        except Exception as e:
+            self.cam_preview.configure(text=f"Can't show the image: {e}")
+
+    def _test_camera(self):
+        from dataclasses import replace
+        form = {}
+        for key, var in self.vars.items():
+            cur = getattr(self.cfg, key)
+            v = var.get()
+            try:
+                form[key] = bool(v) if isinstance(cur, bool) else int(v) if isinstance(cur, int) else \
+                    float(v) if isinstance(cur, float) else str(v).strip()
+            except ValueError:
+                pass
+        test_cfg = replace(self.cfg, **form)
+        self.cam_test_btn.configure(state="disabled")
+        self.cam_status.configure(text="Connecting to the camera…")
+
+        def run():
+            jpg, err = CameraRelay(test_cfg).test_snapshot()
+            def done():
+                self.cam_test_btn.configure(state="normal")
+                self._cam_msg_until = time.time() + 30
+                if jpg:
+                    self.cam_status.configure(text="Camera OK. Click Save & apply to start sending it.")
+                    self._show_preview(jpg)
+                else:
+                    self.cam_status.configure(text=f"Camera test failed: {err}")
+            self.root.after(0, done)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _refresh_camera(self):
+        cam = self.camera
+        if not cam:
+            return
+        if not cam.enabled:
+            text = "Camera is off." if not self.cfg.camera_enabled else "Enter the camera's IP address."
+        else:
+            text = f"Camera: {cam.status}"
+            if cam.last_sent_at:
+                text += f" · last sent {ago(cam.last_sent_at)}"
+            if cam.error:
+                text += f"\n{cam.error}"
+        if str(self.cam_test_btn["state"]) != "disabled" and time.time() > self._cam_msg_until:
+            self.cam_status.configure(text=text)
+        if cam.last_frame and cam.last_frame_at != self._cam_shown_at and self.nb.index("current") == 3:
+            self._cam_shown_at = cam.last_frame_at
+            self._show_preview(cam.last_frame)
+
     def _build_signals(self, nb):
         page = tk.Frame(nb, bg=BG, padx=10, pady=8)
         ttk.Label(page, style="Form.TLabel", wraplength=560, justify="left", text=(
@@ -437,7 +552,11 @@ class App:
     # ------------------------------------------------------------------ services
     def start_services(self):
         self.collector = Collector(self.cfg)
-        self.uploader = Uploader(self.cfg.server_url, self.cfg.api_key, on_ack=self.collector.ack)
+        self.camera = CameraRelay(self.cfg)
+        cam = self.camera
+        self.uploader = Uploader(self.cfg.server_url, self.cfg.api_key, on_ack=self.collector.ack,
+                                 on_response=lambda j: cam.set_live(j.get("camera_live")))
+        self.camera.start()
         self.collector.listeners.append(self.uploader.submit)
         self.uploader.start()
         self.collector.start()
@@ -445,6 +564,8 @@ class App:
                  " (DEMO MODE)" if self.cfg.demo_mode else "")
 
     def stop_services(self):
+        if self.camera:
+            self.camera.stop()
         if self.uploader:
             self.uploader.stop()
         if self.collector:
@@ -515,6 +636,7 @@ class App:
     def _refresh(self):
         col, up, cfg = self.collector, self.uploader, self.cfg
         snap = col.state.snapshot if col else {}
+        self._refresh_camera()
         state = snap.get("state", "off")
         if state == "running" and snap.get("bar_change"):
             state = "barchange"

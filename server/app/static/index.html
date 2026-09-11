@@ -48,6 +48,15 @@
   .banner { background: #2a1d0a; border: 1px solid #5c3d10; color: #ffb454; border-radius: 12px; padding: 10px 14px;
             font-size: 13px; margin-bottom: 14px; }
   .banner code { background: #3a2810; padding: 1px 5px; border-radius: 4px; }
+  .camwrap { margin-top: 12px; }
+  .cam { position: relative; background: #0a0a0a; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+         aspect-ratio: 16 / 9; max-width: 100%; }
+  .cam img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .cam .badge { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+                padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.65); color: #fff; }
+  .cam .badge.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                             background: var(--alarm); margin-right: 6px; vertical-align: 1px; }
+  .cam .wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
   .footrow { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
   .footrow a { color: var(--muted); }
   .footrow a:hover { color: var(--ink); }
@@ -72,6 +81,15 @@
     <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
     <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
     <div class="card"><div class="label">Program</div><div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
+  </div>
+
+  <div class="camwrap" id="camcard" hidden>
+    <h2>Camera</h2>
+    <div class="cam">
+      <div class="wait" id="camwait">Connecting to the camera…</div>
+      <img id="camimg" alt="Machine camera">
+      <div class="badge" id="cambadge"></div>
+    </div>
   </div>
 
   <h2>Active alarms</h2>
@@ -131,6 +149,7 @@ async function status() {
   $("active").innerHTML = s.active_alarms.length ? s.active_alarms.map(a =>
     `<tr><td class="code active">${esc(a.code)}</td><td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${t(a.started_at)}</td></tr>`).join("")
     : `<tr><td class="muted">None</td></tr>`;
+  camUpdate(s.camera);
   $("foot").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
 }
 async function history() {
@@ -165,6 +184,31 @@ fetch("auth/info").then(r => r.json()).then(i => {
   $("forget").hidden = !i.device_trusted;
   $("who").textContent = i.username ? `Logged in as ${i.username}` : "";
 }).catch(() => {});
+// ---- camera: MJPEG stream while the page is visible; the PC only streams while someone watches
+let camOn = false, camRetry = null;
+function camStart() {
+  if (camOn || document.hidden) return;
+  camOn = true;
+  $("camimg").src = "api/camera/stream" + (q ? q + "&" : "?") + "t=" + Date.now();
+}
+function camStop() {
+  camOn = false;
+  clearTimeout(camRetry);
+  $("camimg").src = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";   // aborts the stream
+}
+$("camimg").onload = () => { $("camwait").hidden = true; };
+$("camimg").onerror = () => { if (!camOn) return; camOn = false; camRetry = setTimeout(camStart, 3000); };
+document.addEventListener("visibilitychange", () => document.hidden ? camStop() : camStart());
+function camUpdate(c) {
+  if (!c || !c.available) { $("camcard").hidden = true; return; }
+  $("camcard").hidden = false;
+  const live = c.age_s != null && c.age_s < 6;
+  const b = $("cambadge");
+  b.className = "badge" + (live ? " live" : "");
+  b.textContent = live ? "LIVE" : (c.last_frame_at ? "Last image " + t(c.last_frame_at) : "");
+  camStart();
+}
+
 const tick = () => status().catch(e => $("detail").textContent = "Can't reach server: " + e);
 tick(); history(); setInterval(tick, 2000); setInterval(history, 15000);
 </script>

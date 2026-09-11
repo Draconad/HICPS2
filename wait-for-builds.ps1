@@ -184,6 +184,11 @@ foreach ($t in $targets) {
   }
   $dest = Join-Path $outDir $t.Out
   Move-Item -Force $src $dest
+  $ff = Join-Path $tmp "ffmpeg.exe"
+  if (Test-Path $ff) {
+    Move-Item -Force $ff (Join-Path $outDir "ffmpeg.exe")
+    Write-Host "  + ffmpeg.exe (for the camera - copy it next to the .exe on the machine PC)"
+  }
   Remove-Item -Recurse -Force $tmp
   Write-Host ("{0}: {1}" -f $t.Name, $dest) -ForegroundColor Green
   $saved += $dest
@@ -197,5 +202,5 @@ if ($anyFailed) {
   Pause-Exit 1
 }
 Write-Host "Done. iPhone: update from TestFlight (or install the .ipa with iLoader); copy the .exe to the machine PC" -ForegroundColor Green
-Write-Host "(next to Fwlib32.dll and fwlibe1.dll)."
+Write-Host "(next to Fwlib32.dll and fwlibe1.dll), plus ffmpeg.exe if you use the camera."
 Pause-Exit 0

@@ -129,6 +129,35 @@ struct APIClient {
         return r.ok ? "Test sent to \(r.sent ?? 0) device(s)" : "Not sent: \(r.error?.isEmpty == false ? r.error! : "no devices registered")"
     }
 
+    enum CameraFrame {
+        case new(Data, etag: String?, frameTime: Double?)
+        case unchanged
+        case noImage
+    }
+
+    /// Latest camera still. Pass the previous ETag to get `.unchanged` instead of the same image again.
+    func cameraFrame(etag: String?) async throws -> CameraFrame {
+        var req = try request("/api/camera/frame.jpg")
+        if let etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await Self.session.data(for: req)
+        } catch {
+            throw APIError.unreachable((error as NSError).localizedDescription)
+        }
+        let http = resp as? HTTPURLResponse
+        switch http?.statusCode ?? 0 {
+        case 200:
+            let ft = (http?.value(forHTTPHeaderField: "X-Frame-Time")).flatMap(Double.init)
+            return .new(data, etag: http?.value(forHTTPHeaderField: "ETag"), frameTime: ft)
+        case 304: return .unchanged
+        case 404: return .noImage
+        case 401: throw APIError.unauthorized
+        case let code: throw APIError.http(code)
+        }
+    }
+
     func clearHistory() async throws {
         struct OK: Decodable { var ok: Bool }
         _ = try await send(try request("/api/alarms", method: "DELETE"), as: OK.self)

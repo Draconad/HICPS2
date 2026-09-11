@@ -130,6 +130,24 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 While the bar-change M code (**M92** by default; set under **Bar change M code**, 0 turns it off) is the block being executed, the status shows **Bar change** (blue) on the PC app, dashboard, iPhone app and Live Activity, with a timer. The part made across a bar change doesn't count towards the cycle time.
 The log shows how each bar change was spotted, e.g. `Bar change started (Main: M92 active)`. If a bar change happens and nothing is logged, use the Signal finder while one is in progress.
 
+### Camera (Tapo C210 or any RTSP camera)
+The PC app reads the camera on the machine's network and sends it to the server. It shows on the dashboard, below the part count, and on the iPhone app's **Camera** tab. Only the PC app talks to the camera; nothing new is opened up on the network.
+1. **In the Tapo app:** tap the camera > ⚙ Settings > **Advanced Settings > Camera Account**. Create a username and password. This is a separate login just for the camera, not your TP-Link account.
+2. **ffmpeg.exe:** copy it next to `HanwhaMonitor.exe` on the machine PC. The download script saves it in `build-out` along with the exe. It's a 64-bit program; if the PC runs 32-bit Windows, the Camera tab will say so, and a 32-bit ffmpeg.exe is needed.
+3. **In the PC app's Camera tab:**
+   1. Enter the camera IP (`192.168.11.15`) and the Camera Account username and password.
+   2. Click **Test camera**. You should get "Camera OK" and a preview.
+   3. Tick **Send the camera to the dashboard and iPhone app**, then click **Save & apply**.
+4. It's worth giving the camera a fixed IP address (a DHCP reservation in the router) so the address doesn't change.
+
+**Data use:** while nobody is watching, one still image is sent every minute (about 20-40 KB). While the dashboard or the app's Camera tab is open, it streams at the **Frames per second** setting (default 4). The low-res stream uses roughly 100-200 KB/s, and it stops about 20 s after the last viewer leaves. **HD stream** is sharper but uses about 4x the data.
+
+**If the camera test fails:**
+- **"rejected the username/password":** use the Camera Account from step 1, not your TP-Link account.
+- **Refused or can't reach:** check the IP address. Tapo cameras also only run two of these three at once: Tapo Care, SD card recording, and RTSP (which this uses). Turn one of the other two off.
+
+The camera is behind the dashboard login and the API key, like everything else. Set `API_KEY` if the server is reachable from the internet.
+
 ### Work counter "stop at required count"
 Whether the machine stops at the required count is a Hanwha setting, not a standard FANUC one, so its address has to be found once:
 1. Open the **Signal finder** tab with the machine idle. Click **Take snapshot A**.

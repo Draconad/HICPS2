@@ -13,10 +13,11 @@ log = logging.getLogger("hanwha.uploader")
 
 
 class Uploader:
-    def __init__(self, server_url: str, api_key: str = "", on_ack=None):
+    def __init__(self, server_url: str, api_key: str = "", on_ack=None, on_response=None):
         self.url = normalize_url(server_url)
         self.api_key = api_key
         self.on_ack = on_ack
+        self.on_response = on_response   # called with the server's JSON reply to every upload
         self.connected = False
         self.last_ok: float | None = None
         self.last_error = ""
@@ -64,7 +65,13 @@ class Uploader:
                 if r.status_code == 401:
                     raise RuntimeError("Server rejected API key (401)")
                 r.raise_for_status()
-                ack = set(r.json().get("ack", []))
+                reply = r.json()
+                if self.on_response:
+                    try:
+                        self.on_response(reply)
+                    except Exception:
+                        log.exception("on_response failed")
+                ack = set(reply.get("ack", []))
                 if self.on_ack and ack:
                     self.on_ack(ack)
                 if not self.connected:

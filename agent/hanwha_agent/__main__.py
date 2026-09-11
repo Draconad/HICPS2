@@ -65,8 +65,11 @@ def main(argv=None):
     if args.headless:
         from .collector import Collector
         from .uploader import Uploader
+        from .camera import CameraRelay
         col = Collector(cfg)
-        up = Uploader(cfg.server_url, cfg.api_key, on_ack=col.ack)
+        cam = CameraRelay(cfg)
+        up = Uploader(cfg.server_url, cfg.api_key, on_ack=col.ack,
+                      on_response=lambda j: cam.set_live(j.get("camera_live")))
         col.listeners.append(up.submit)
         col.listeners.append(lambda s: log.info("state=%s parts=%s/%s cycle=%s prog=%s alarms=%d",
                                                 s["state"], s.get("parts"), s.get("parts_required"),
@@ -74,7 +77,8 @@ def main(argv=None):
                                                 len([a for a in s.get("alarms", []) if not a.get("cleared_at")])))
         up.start()
         col.start()
-        signal.signal(signal.SIGINT, lambda *_: (col.stop(), up.stop(), sys.exit(0)))
+        cam.start()
+        signal.signal(signal.SIGINT, lambda *_: (cam.stop(), col.stop(), up.stop(), sys.exit(0)))
         while True:
             time.sleep(1)
 

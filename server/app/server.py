@@ -12,6 +12,8 @@ status to the iPhone app plus a small web dashboard.
   POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
   POST /api/push/unregister {token? , activity_id?}
   GET  /api/push/status     POST /api/push/test
+  POST /api/camera/frame    (agent, image/jpeg)   GET /api/camera/frame.jpg   GET /api/camera/stream (MJPEG)
+  GET  /api/camera/status
   GET  /               web dashboard (needs a web login)      GET /login  login page
   GET  /auth/info   POST /auth/login {username,password,api_key?}   POST /auth/change   POST /auth/logout
 
@@ -37,13 +39,15 @@ from urllib.parse import parse_qs, urlparse
 try:  # works both as "python app/server.py" and as a package import
     from apns import APNs
     from auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
+    from camera import MAX_FRAME, Camera
     from push import PushService
 except ImportError:  # pragma: no cover
     from .apns import APNs
     from .auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
+    from .camera import MAX_FRAME, Camera
     from .push import PushService
 
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -269,7 +273,7 @@ def ingest(snap: dict) -> dict:
         kv_set("latest", latest)
         kv_set("meta", meta)
     push.poke()
-    return {"ok": True, "ack": ack}
+    return {"ok": True, "ack": ack, "camera_live": camera.watched}
 
 
 def status() -> dict:
@@ -314,6 +318,7 @@ def status() -> dict:
             "bar_change_since": meta.get("bar_change_since") if bar_change else None,
             # work counter "stop at required count" switch: True/False, None = not set up on the monitor PC
             "work_counter": latest.get("work_counter") if state != "off" else None,
+            "camera": camera.info(),
         }
 
 
@@ -355,6 +360,7 @@ def _kv_set_locked(k, v):
 
 
 push = PushService(db, _lock, APNs(), lambda: status(), _kv_get_locked, _kv_set_locked)
+camera = Camera(Path(DB_PATH).parent)
 auth = Auth(db, _lock, reset=os.environ.get("RESET_LOGIN", "").strip().lower() in ("1", "true", "yes"))
 
 
@@ -543,6 +549,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": True})
                 if method == "POST" and path == "/api/push/test":
                     return self._json(push.test_alert())
+            if path.startswith("/api/camera/"):
+                return self._camera_route(method, path)
             if method == "DELETE" and path == "/api/alarms":
                 if (qs.get("demo") or ["0"])[0].lower() in ("1", "true", "yes"):
                     return self._json(clear_demo())
@@ -553,6 +561,62 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # pragma: no cover
             log.exception("request failed")
             return self._json({"detail": f"server error: {e}"}, 500)
+
+    # ------------------------------------------------------------------ camera
+    def _camera_route(self, method: str, path: str):
+        if method == "POST" and path == "/api/camera/frame":
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 < length <= MAX_FRAME:
+                return self._json({"detail": "bad frame"}, 400)
+            jpg = self.rfile.read(length)
+            if not jpg.startswith(b"\xff\xd8"):
+                return self._json({"detail": "not a JPEG"}, 400)
+            try:
+                ft = float(self.headers.get("X-Frame-Time") or 0) or None
+            except ValueError:
+                ft = None
+            camera.put(jpg, ft)
+            return self._json({"ok": True, "live": camera.watched})
+        if method == "GET" and path == "/api/camera/status":
+            return self._json(camera.info())
+        if method == "GET" and path == "/api/camera/frame.jpg":
+            camera.touch()
+            seq, jpg, ft = camera.seq, camera.jpg, camera.frame_time
+            if jpg is None:
+                return self._json({"detail": "no camera image yet"}, 404)
+            etag = f'"{seq}"'
+            hdrs = {"ETag": etag, "X-Frame-Time": f"{ft:.3f}"}
+            if self.headers.get("If-None-Match") == etag:
+                return self._send(304, b"", "image/jpeg", hdrs)
+            return self._send(200, jpg, "image/jpeg", hdrs)
+        if method == "GET" and path == "/api/camera/stream":
+            return self._mjpeg()
+        return self._json({"detail": "not found"}, 404)
+
+    def _mjpeg(self):
+        """multipart/x-mixed-replace stream for <img src>. Re-sends the last frame every few seconds when nothing
+        new arrives, so a closed browser tab is noticed (the write fails) and the agent can stop streaming."""
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        seq, started, last_write = -1, time.time(), 0.0
+        try:
+            while time.time() - started < 30 * 60:   # the page reconnects after this
+                camera.touch()
+                new_seq, jpg, ft = camera.wait_new(seq, timeout=1.0)
+                if jpg is None or (new_seq == seq and time.time() - last_write < 5):
+                    continue
+                seq = new_seq
+                self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpg))
+                self.wfile.write(jpg)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+                last_write = time.time()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def do_GET(self):
         self._route("GET")
