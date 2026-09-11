@@ -7,6 +7,7 @@ struct StatusView: View {
     @StateObject private var camera = CameraModel()
     @State private var cameraFullScreen = false
     @AppStorage(SettingsKey.showCamera) private var showCamera = true
+    @AppStorage("cameraCollapsed") private var cameraCollapsed = false
 
     var body: some View {
         NavigationStack {
@@ -21,10 +22,13 @@ struct StatusView: View {
                             MessagesCard(messages: msgs, offset: s.clockOffset)
                         }
                         if showCamera && s.camera?.available == true {
-                            CameraPanel(model: camera, player: camera.player, features: s.camera) {
-                                cameraFullScreen = true
+                            CameraHeader(collapsed: $cameraCollapsed)
+                            if !cameraCollapsed {
+                                CameraPanel(model: camera, player: camera.player, features: s.camera) {
+                                    cameraFullScreen = true
+                                }
+                                CameraControls(model: camera, features: s.camera)
                             }
-                            CameraControls(model: camera, features: s.camera)
                         }
                         HStack(spacing: 14) {
                             PartsCard(s: s)
@@ -50,8 +54,9 @@ struct StatusView: View {
             .navigationTitle(store.status?.machineName ?? "Machine")
         }
         // the camera only streams while this screen is showing and the app is in the foreground
-        .task(id: phase) {
-            guard phase == .active, showCamera else { return }
+        // folding the camera away stops the video too (the PC only streams while someone is watching)
+        .task(id: "\(phase)|\(cameraCollapsed)|\(showCamera)") {
+            guard phase == .active, showCamera, !cameraCollapsed else { return }
             await camera.run(store: store)
         }
         .fullScreenCover(isPresented: $cameraFullScreen) {
@@ -65,6 +70,39 @@ struct StatusView: View {
 // MARK: - Cards
 
 /// Operator messages from the CNC (e.g. "work count end in 1 hour") - shown as information, not alarms.
+/// "CAMERA ⌄" - tap to fold the video (and its controls) away; remembered.
+struct CameraHeader: View {
+    @Binding var collapsed: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "video.fill").foregroundStyle(.secondary)
+                Text("CAMERA")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if collapsed {
+                    Text("hidden – tap to show")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? -90 : 0))
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(collapsed ? "Show camera" : "Hide camera")
+    }
+}
+
 struct MessagesCard: View {
     let messages: [MachineStatus.OpMessage]
     let offset: Double

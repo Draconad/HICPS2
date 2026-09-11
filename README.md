@@ -192,7 +192,8 @@ Operator messages on the CNC screen, such as the XE35's "1 hour" and "30 minutes
 - **Sound:** the camera's microphone plays with the video, converted on the PC to a format phones and browsers can play. It starts muted; tap the speaker button to unmute. Untick **Camera audio** in the Camera tab to leave sound out.
 - **Pan/tilt:** use the arrows over the video, in the app or on the dashboard. On the dashboard they appear when the mouse is over the video, or for a few seconds after tapping it on a touch screen. Each tap nudges the camera a little. The picture is a few seconds behind, so moves show up late.
 - **Camera mounted upside down:** tick **Reverse pan** and **Reverse tilt** in the PC app's Camera tab. The Tapo app's image flip turns the picture the right way up but not the motors, so the arrows would otherwise move the wrong way.
-- **Positions:** positions saved in the Tapo app (camera > pan/tilt > Preset) appear as buttons under the video. In the iPhone app, the arrows and positions are in a **Camera controls** card under the video that you tap to open or close; the app remembers which. New ones show up within about 5 minutes.
+- **Positions:** positions saved in the Tapo app (camera > pan/tilt > Preset) appear as buttons under the video. In the iPhone app, the arrows and positions are in a **Camera controls** card under the video that you tap to open or close; the app remembers which.
+- **Hiding the camera:** click or tap the **Camera** heading, on the dashboard or in the app, to fold the video away. It's remembered, and while it's folded no live video is streamed. New ones show up within about 5 minutes.
 - Pan/tilt uses the camera's ONVIF service (port 2020) with the same Camera Account as the video. Commands go through the server to the PC app over a connection the PC keeps open, so they arrive in well under a second.
 
 ### Controls tab (iPhone app)

@@ -81,6 +81,12 @@
          border-radius: 12px; padding: 10px 14px; font-weight: 600; }
   .msg .t { margin-left: auto; color: #6b8fb8; font-weight: 500; font-size: 13px; white-space: nowrap; }
   .camwrap { margin-top: 12px; }
+  .camhead { display: flex; align-items: center; gap: 10px; width: 100%; margin: 24px 0 8px; padding: 0; border: 0;
+             background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  .camhead h2 { margin: 0; }
+  .camhead .chev { margin-left: auto; color: var(--muted); transition: transform .2s; }
+  .camhead[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+  .camhead:hover .chev { color: var(--ink); }
   .cam { position: relative; background: #0a0a0a; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
          aspect-ratio: 16 / 9; max-width: 100%; }
   .cam img, .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #0a0a0a; }
@@ -146,7 +152,11 @@
   <div class="msgs" id="msgs"></div>
 
   <div class="camwrap" id="camcard" hidden>
-    <h2>Camera</h2>
+    <button class="camhead" id="camhead" aria-expanded="true">
+      <h2>Camera</h2><span class="sub" id="camhint"></span>
+      <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div id="cambody">
     <div class="cam">
       <div class="wait" id="camwait">Connecting to the camera…</div>
       <img id="camimg" alt="Machine camera">
@@ -165,6 +175,7 @@
     </div>
     <div class="presets" id="presets" hidden></div>
     <p class="sub" id="camnote">Live video runs a few seconds behind real time.</p>
+    </div>
   </div>
 
   <h2>Active alarms</h2>
@@ -409,8 +420,23 @@ async function camTick() {
   } catch (e) {}
   camBadge();
 }
+// the camera section can be folded away (remembered in this browser); folded = no video is streamed
+let camCollapsed = false;
+try { camCollapsed = localStorage.getItem("camCollapsed") === "1"; } catch (e) {}
+function camFold() {
+  $("cambody").hidden = camCollapsed;
+  $("camhead").setAttribute("aria-expanded", String(!camCollapsed));
+  $("camhint").textContent = camCollapsed ? "hidden - click to show" : "";
+}
+$("camhead").onclick = () => {
+  camCollapsed = !camCollapsed;
+  try { localStorage.setItem("camCollapsed", camCollapsed ? "1" : "0"); } catch (e) {}
+  camFold();
+  camCollapsed ? camStop() : camStart();
+};
+camFold();
 function camStart() {
-  if (camVisible || document.hidden || $("camcard").hidden) return;
+  if (camVisible || document.hidden || camCollapsed || $("camcard").hidden) return;
   camVisible = true;
   refreshStill(); camTick();
   camPoll = setInterval(camTick, 2000);
@@ -490,7 +516,7 @@ function camUpdate(c) {
   camStart();
 }
 
-const tick = () => status().catch(e => $("detail").textContent = "Can't reach server: " + e);
+const tick = () => status().catch(e => $("seen").textContent = "Can't reach server: " + e);
 tick(); history(); setInterval(tick, 2000); setInterval(history, 15000);
 </script>
 </body>
