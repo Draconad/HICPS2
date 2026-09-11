@@ -67,6 +67,8 @@ struct MachineActivityAttributes: ActivityAttributes {
         var barChangeStartEpoch: Double?
         /// Work counter "stop at required count": true = on, false = off, nil = not known
         var counterStop: Bool?
+        /// The CNC's operator message, if any (e.g. "work count end in 1 hour")
+        var message: String?
 
         var kind: MachineStateKind { barChange == true && state == .running ? .barChange : state }
         var barChangeStart: Date? { barChangeStartEpoch.map { Date(timeIntervalSince1970: $0) } }

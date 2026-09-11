@@ -96,6 +96,12 @@ final class MachineStore: ObservableObject {
                     body: [a.displayMessage, a.pathName.map { "\($0) path" }].compactMap { $0 }.joined(separator: " · "))
             }
         }
+        if AppSettings.notifyMessages {
+            for m in s.messages ?? [] where NotificationManager.shared.markAlarmNotified("msg-\(m.id)") {
+                guard Date().timeIntervalSince1970 - (m.startedAt + s.clockOffset) < 15 * 60 else { continue }
+                NotificationManager.shared.post(id: "msg-\(m.id)", title: "💬 \(s.machineName)", body: m.text)
+            }
+        }
         guard let prev = previousState, prev != s.state else { return }
         if AppSettings.notifyStopped, prev.isRunning, s.state == .standby {
             NotificationManager.shared.post(id: "stopped-\(Int(s.serverTime))", title: "\(s.machineName) stopped",

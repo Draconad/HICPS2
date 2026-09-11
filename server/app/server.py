@@ -8,6 +8,7 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/alarms     alarm history  (?limit=100&before=<epoch>&active=1)
   DELETE /api/alarms   clear cleared history  (?demo=1: delete demo-mode alarms only)
   GET  /api/states     state change log (?hours=24)
+  GET  /api/messages   operator message history (?limit=100) - e.g. "work count end in 1 hour", not alarms
   GET  /api/health
   POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
   POST /api/push/unregister {token? , activity_id?}
@@ -53,7 +54,7 @@ except ImportError:  # pragma: no cover
     from .commands import ALLOWED, Commands
     from .push import PushService
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -84,6 +85,9 @@ def _connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS state_log (ts REAL NOT NULL, state TEXT NOT NULL, detail TEXT);
         CREATE INDEX IF NOT EXISTS state_log_ts ON state_log(ts DESC);
         CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS op_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, number INTEGER, text TEXT NOT NULL,
+            started_at REAL NOT NULL, cleared_at REAL, demo INTEGER);
+        CREATE INDEX IF NOT EXISTS op_messages_started ON op_messages(started_at DESC);
     """)
     cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
     if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
@@ -235,6 +239,27 @@ def upsert_alarms(alarms: list[dict], offset: float, now: float, machine_connect
     return ack
 
 
+def upsert_messages(messages: list[dict], now: float, demo: bool):
+    """Operator messages (not alarms): open a row when one appears, close it when it's gone."""
+    current = {(int(m.get("number") or 0), str(m.get("text") or "").strip()) for m in messages if isinstance(m, dict)}
+    open_rows = db.execute("SELECT id, number, text FROM op_messages WHERE cleared_at IS NULL").fetchall()
+    have = {(r["number"], r["text"]): r["id"] for r in open_rows}
+    for key, rid in have.items():
+        if key not in current:
+            db.execute("UPDATE op_messages SET cleared_at=? WHERE id=?", (now, rid))
+    for number, text in current - set(have):
+        db.execute("INSERT INTO op_messages(number,text,started_at,demo) VALUES(?,?,?,?)", (number, text, now, int(demo)))
+        log.info("MESSAGE %s %s", number, text)
+
+
+def message_rows(active_only: bool, limit: int = 100) -> list[dict]:
+    sql = "SELECT * FROM op_messages" + (" WHERE cleared_at IS NULL" if active_only else "") + \
+          " ORDER BY started_at DESC LIMIT ?"
+    return [{"id": r["id"], "number": r["number"], "text": r["text"], "started_at": r["started_at"],
+             "cleared_at": r["cleared_at"], "active": r["cleared_at"] is None, "demo": bool(r["demo"])}
+            for r in db.execute(sql, (limit,)).fetchall()]
+
+
 def ingest(snap: dict) -> dict:
     now = time.time()
     with _lock:
@@ -247,6 +272,10 @@ def ingest(snap: dict) -> dict:
         db.execute("BEGIN")
         try:
             ack = upsert_alarms(snap.get("alarms") or [], offset, now, connected, demo)
+            if connected and "messages" in snap:
+                upsert_messages(snap.get("messages") or [], now, demo)
+            elif not connected:
+                db.execute("UPDATE op_messages SET cleared_at=? WHERE cleared_at IS NULL", (now,))
             db.execute("COMMIT")
         except Exception:
             db.execute("ROLLBACK")
@@ -318,6 +347,7 @@ def status() -> dict:
             "program": latest.get("program") or {},
             "paths": latest.get("paths") or [],
             "active_alarms": active if state != "off" else [],
+            "messages": message_rows(True, 10) if state != "off" else [],
             "alarms_today": today,
             # A bar change is reported as state "running" plus this flag (keeps older app builds working).
             "bar_change": bar_change,
@@ -570,6 +600,10 @@ class Handler(BaseHTTPRequestHandler):
                 before = float(qs["before"][0]) if qs.get("before") else None
                 active = (qs.get("active") or ["0"])[0].lower() in ("1", "true", "yes")
                 return self._json(alarm_history(limit, before, active))
+            if method == "GET" and path == "/api/messages":
+                limit = max(1, min(500, int((qs.get("limit") or ["100"])[0])))
+                with _lock:
+                    return self._json({"messages": message_rows(False, limit)})
             if method == "GET" and path == "/api/states":
                 hours = max(0.1, min(24 * 31, float((qs.get("hours") or ["24"])[0])))
                 return self._json(state_history(hours))

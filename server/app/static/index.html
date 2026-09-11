@@ -48,6 +48,10 @@
   .banner { background: #2a1d0a; border: 1px solid #5c3d10; color: #ffb454; border-radius: 12px; padding: 10px 14px;
             font-size: 13px; margin-bottom: 14px; }
   .banner code { background: #3a2810; padding: 1px 5px; border-radius: 4px; }
+  .msgs { margin-top: 12px; display: grid; gap: 8px; }
+  .msg { display: flex; gap: 10px; align-items: center; background: #0e1f33; border: 1px solid #1f4470; color: #9ecbff;
+         border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+  .msg .t { margin-left: auto; color: #6b8fb8; font-weight: 500; font-size: 13px; white-space: nowrap; }
   .camwrap { margin-top: 12px; }
   .cam { position: relative; background: #0a0a0a; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
          aspect-ratio: 16 / 9; max-width: 100%; }
@@ -99,6 +103,8 @@
     <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
     <div class="card"><div class="label">Program</div><div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
   </div>
+
+  <div class="msgs" id="msgs"></div>
 
   <div class="camwrap" id="camcard" hidden>
     <h2>Camera</h2>
@@ -180,6 +186,8 @@ async function status() {
     `<tr><td class="code active">${esc(a.code)}</td><td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${t(a.started_at)}</td></tr>`).join("")
     : `<tr><td class="muted">None</td></tr>`;
   camUpdate(s.camera);
+  $("msgs").innerHTML = (s.messages || []).map(m =>
+    `<div class="msg">&#128172; ${esc(m.text || "Message " + m.number)}<span class="t">since ${t(m.started_at)}</span></div>`).join("");
   $("foot").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
 }
 async function history() {

@@ -12,6 +12,7 @@ enum SettingsKey {
     static let notifyStopped = "notifyStopped"
     static let notifyOff = "notifyOff"
     static let showCamera = "showCameraOnStatus"
+    static let notifyMessages = "notifyMessages"
 }
 
 enum AppSettings {
@@ -29,6 +30,7 @@ enum AppSettings {
             SettingsKey.notifyStopped: false,
             SettingsKey.notifyOff: false,
             SettingsKey.showCamera: true,
+            SettingsKey.notifyMessages: true,
         ])
     }
 
@@ -40,5 +42,6 @@ enum AppSettings {
     static var liveActivity: Bool { defaults.bool(forKey: SettingsKey.liveActivity) }
     static var notifyAlarms: Bool { defaults.bool(forKey: SettingsKey.notifyAlarms) }
     static var notifyStopped: Bool { defaults.bool(forKey: SettingsKey.notifyStopped) }
+    static var notifyMessages: Bool { defaults.bool(forKey: SettingsKey.notifyMessages) }
     static var notifyOff: Bool { defaults.bool(forKey: SettingsKey.notifyOff) }
 }

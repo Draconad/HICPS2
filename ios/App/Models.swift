@@ -74,6 +74,15 @@ struct MachineStatus: Decodable, Equatable {
     var workCounter: Bool?
     var camera: CameraInfo?
     var controls: ControlsInfo?
+    /// Operator messages on the CNC screen (e.g. "work count end in 1 hour") - information, not alarms
+    var messages: [OpMessage]?
+
+    struct OpMessage: Decodable, Equatable, Identifiable {
+        var id: Int
+        var number: Int?
+        var text: String
+        var startedAt: Double
+    }
 
     struct CameraInfo: Decodable, Equatable {
         var available: Bool?
@@ -100,7 +109,7 @@ struct MachineStatus: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case serverTime, machineName, state, stateDetail, stateSince, agentOnline, agentLastSeen, machineConnected,
              demo, parts, partsRequired, partsTotal, lastCycleS, cycleTimerS, cycleStartedAt, etaS, program, paths,
-             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter, camera, controls
+             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter, camera, controls, messages
     }
 
     func date(_ serverEpoch: Double?) -> Date? {

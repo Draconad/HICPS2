@@ -119,7 +119,8 @@ final class LiveActivityManager: ObservableObject {
             reachable: reachable,
             updatedEpoch: Date().timeIntervalSince1970,
             barChangeStartEpoch: s.barChangeStart?.timeIntervalSince1970,
-            counterStop: s.workCounter)
+            counterStop: s.workCounter,
+            message: s.messages?.first?.text)
     }
 
     /// One-line summary shown in Settings to help work out why nothing appears.

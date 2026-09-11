@@ -215,6 +215,13 @@ struct LockScreenView: View {
                         .lineLimit(1)
                 }
 
+                if let msg = s.message, !msg.isEmpty, s.alarms.isEmpty, !stale {
+                    Label(msg, systemImage: "text.bubble.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.4, green: 0.7, blue: 1.0))
+                        .lineLimit(1)
+                }
+
                 if stale || !s.reachable {
                     HStack(spacing: 4) {
                         Image(systemName: "wifi.exclamationmark")

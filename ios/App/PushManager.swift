@@ -34,7 +34,8 @@ final class PushManager: ObservableObject {
     }
 
     var prefs: [String: Bool] {
-        ["alarms": AppSettings.notifyAlarms, "stopped": AppSettings.notifyStopped, "off": AppSettings.notifyOff]
+        ["alarms": AppSettings.notifyAlarms, "stopped": AppSettings.notifyStopped, "off": AppSettings.notifyOff,
+         "messages": AppSettings.notifyMessages]
     }
 
     // MARK: - from the app delegate

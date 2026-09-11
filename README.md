@@ -164,6 +164,9 @@ The dashboard and the app restart the video by themselves if the picture ever fr
 
 The camera is behind the dashboard login and the API key, like everything else. Set `API_KEY` if the server is reachable from the internet.
 
+### Machine messages (not alarms)
+Operator messages on the CNC screen, such as the XE35's "1 hour" and "30 minutes" to required count, are picked up too. They're read with `cnc_rdopmsg`, since they aren't alarms. Each new one sends a notification (💬, not the alarm style) and shows in blue on the dashboard, the app's Status screen, the Live Activity and the PC app's Overview. The machine's state stays Running. Notifications for them can be switched off in the app under Settings > Notifications > **Machine messages**. The history is at `/api/messages`.
+
 ### Camera sound, pan/tilt and saved positions
 - **Sound:** the camera's microphone plays with the video, converted on the PC to a format phones and browsers can play. It starts muted; tap the speaker button to unmute. Untick **Camera audio** in the Camera tab to leave sound out.
 - **Pan/tilt:** use the arrows over the video, in the app or on the dashboard. Each tap nudges the camera a little. The picture is a few seconds behind, so moves show up late.
@@ -298,6 +301,7 @@ Tick **Demo mode** in the PC app's Settings. It simulates cycles, part counts, s
 | Data | FOCAS call | Notes |
 |---|---|---|
 | Run state / mode / e-stop | `cnc_statinfo` per path | Running = START on any path; Alarm = any alarm or E-stop; otherwise Standby. Off = can't connect 3 times in a row. |
+| Operator messages | `cnc_rdopmsg` (Counter path) | Messages 2000-2099, e.g. the time-to-count warnings. Not alarms. |
 | Alarms | `cnc_alarm2` + `cnc_rdalmmsg2` per path | Shown as FANUC codes: `EX1051`, `SV0401`, `OT0500`, `DS0300`… |
 | Part count / required | macro `#3901` / `#3902` (fallback: parameters 6711 / 6713) | Read from the **Counter path** setting (default 1 = Main). |
 | Total parts | parameter 6712 | |

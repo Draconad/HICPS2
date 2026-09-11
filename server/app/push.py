@@ -99,6 +99,9 @@ class PushService:
             "reachable": True,
             "updatedEpoch": round(time.time(), 1),
         }
+        msgs = s.get("messages") or []
+        if msgs:
+            c["message"] = msgs[0].get("text") or ""
         for key, src in (("parts", "parts"), ("required", "parts_required"), ("lastCycle", "last_cycle_s"),
                          ("cycleStartEpoch", "cycle_started_at")):
             if s.get(src) is not None:
@@ -187,6 +190,20 @@ class PushService:
             if state_changed and prefs.get("off") and s["state"] == "off":
                 self._send(row, {"aps": {"alert": {"title": f"{machine} is off", "body": s.get("state_detail") or ""},
                                          "sound": "default", "thread-id": "state"}}, "alert", 10)
+        # ---- operator messages (e.g. "work count end in 1 hour") - not alarms, but worth a notification
+        msg_notified = set(self.kv_get("push_notified_messages", []) or [])
+        active_msgs = s.get("messages") or []
+        new_msgs = [m for m in active_msgs if m["id"] not in msg_notified and now - m["started_at"] < 15 * 60]
+        for row in alert_rows:
+            prefs = json.loads(row["prefs"] or "{}")
+            if prefs.get("messages", True):
+                for m in new_msgs:
+                    self._send(row, {"aps": {"alert": {"title": f"💬 {machine}", "body": m.get("text") or f"Message {m.get('number')}"},
+                                             "sound": "default", "thread-id": "messages"}}, "alert", 10,
+                               collapse=f"msg{m['id']}")
+        if new_msgs or {m["id"] for m in active_msgs} != msg_notified:
+            self.kv_set("push_notified_messages", sorted({m["id"] for m in active_msgs} | {m["id"] for m in new_msgs}))
+
         if new_alarms or set(active_ids) != notified:
             self.kv_set("push_notified_alarms", sorted(set(active_ids) | {a["id"] for a in new_alarms}))
         self.kv_set("push_last_state", s["state"])
@@ -215,7 +232,8 @@ class PushService:
                 continue
             prev_c = json.loads(last_key) if last_key else {}
             important = state_changed or bool(new_alarms) or (last_key and (
-                prev_c.get("state") != content["state"] or bool(prev_c.get("barChange")) != bool(content.get("barChange"))))
+                prev_c.get("state") != content["state"] or bool(prev_c.get("barChange")) != bool(content.get("barChange"))
+                or prev_c.get("message") != content.get("message")))
             if not important and now - (row["last_push"] or 0) < MIN_GAP_LOW_PRIORITY:
                 continue
             aps = {"timestamp": int(now), "event": "update", "content-state": content,

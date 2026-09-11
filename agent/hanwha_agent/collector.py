@@ -70,6 +70,7 @@ class Collector:
         self._bar_since: float | None = None
         self._bar_methods_failed: set[str] = set()
         self._work_counter: bool | None = None
+        self._messages_seen: set = set()
         self._jobs: queue.Queue = queue.Queue()
         self.camera_presets: list[dict] = []          # the camera's saved positions (filled in by CommandClient)   # machine writes from the app, run on this thread between polls
         self._wc_error = ""
@@ -226,6 +227,21 @@ class Collector:
             if e.is_connection_error:
                 raise
 
+        messages: list[dict] = []
+        if "opmsg" not in self._bar_methods_failed:
+            try:
+                messages = [{"number": n, "text": t} for n, t in m.op_messages(cp)]
+            except FocasError as e:
+                if e.is_connection_error:
+                    raise
+                self._bar_methods_failed.add("opmsg")
+                log.info("Can't read operator messages (%s)", e)
+        shown = {(x["number"], x["text"]) for x in messages}
+        for x in messages:
+            if (x["number"], x["text"]) not in self._messages_seen:
+                log.info("Machine message %s: %s", x["number"], x["text"])
+        self._messages_seen = shown
+
         wc = None
         sig = parse_signal(cfg.work_counter_signal)
         if sig:
@@ -252,7 +268,7 @@ class Collector:
 
         return {"paths": paths, "alarms": alarms, "parts": parts, "required": required, "total": total,
                 "timer": timer, "program": {"number": prog_num, "name": prog_name, "comment": comment},
-                "bar_change": bar, "bar_how": how, "work_counter": wc}
+                "bar_change": bar, "bar_how": how, "work_counter": wc, "messages": messages}
 
     def _detect_bar_change(self, paths: list[dict]) -> tuple[bool, str]:
         """True while the bar-change subprogram (O9002) is executing on a running path - optionally also while a
@@ -444,6 +460,7 @@ class Collector:
             "bar_change": bar and state == "running",
             "bar_change_how": data.get("bar_how") if bar else "",
             "work_counter": data.get("work_counter"),   # None = not configured / unreadable
+            "messages": data.get("messages") or [],     # operator messages (not alarms)
         })
         return base
 

@@ -17,6 +17,9 @@ struct StatusView: View {
                     }
                     if let s = store.status {
                         StateHeader(s: s)
+                        if let msgs = s.messages, !msgs.isEmpty {
+                            MessagesCard(messages: msgs, offset: s.clockOffset)
+                        }
                         if showCamera && s.camera?.available == true {
                             CameraPanel(model: camera, player: camera.player, features: s.camera) {
                                 cameraFullScreen = true
@@ -59,6 +62,31 @@ struct StatusView: View {
 }
 
 // MARK: - Cards
+
+/// Operator messages from the CNC (e.g. "work count end in 1 hour") - shown as information, not alarms.
+struct MessagesCard: View {
+    let messages: [MachineStatus.OpMessage]
+    let offset: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(messages) { m in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "text.bubble.fill").foregroundStyle(Color(red: 0.4, green: 0.7, blue: 1.0))
+                    Text(m.text).font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 4)
+                    Text(Date(timeIntervalSince1970: m.startedAt + offset), style: .relative)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(red: 0.06, green: 0.13, blue: 0.22), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(red: 0.12, green: 0.27, blue: 0.44)))
+    }
+}
 
 struct Card<Content: View>: View {
     var title: String?

@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.notifyAlarms) private var notifyAlarms = true
     @AppStorage(SettingsKey.notifyStopped) private var notifyStopped = false
     @AppStorage(SettingsKey.notifyOff) private var notifyOff = false
+    @AppStorage(SettingsKey.notifyMessages) private var notifyMessages = true
 
     @State private var testResult: (ok: Bool, text: String)?
     @State private var testing = false
@@ -156,6 +157,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("New alarms", isOn: $notifyAlarms)
+                    Toggle("Machine messages (e.g. 1 hour to count)", isOn: $notifyMessages)
                     Toggle("Machine stopped (running → standby)", isOn: $notifyStopped)
                     Toggle("Machine switched off / offline", isOn: $notifyOff)
                     if notifStatus == .denied {
@@ -206,6 +208,7 @@ struct SettingsView: View {
             .onChange(of: notifyAlarms) { _ in push.registerAll() }
             .onChange(of: notifyStopped) { _ in push.registerAll() }
             .onChange(of: notifyOff) { _ in push.registerAll() }
+            .onChange(of: notifyMessages) { _ in push.registerAll() }
             .onDisappear { store.restartPolling() }
             .confirmationDialog("Clear alarm history?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Clear history", role: .destructive) {

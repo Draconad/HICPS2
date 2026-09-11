@@ -298,6 +298,7 @@ class App:
             self.alarm_tree.heading(c, text=t, anchor="w")
             self.alarm_tree.column(c, width=w, anchor="w", stretch=(c == "message"))
         self.alarm_tree.tag_configure("alarm", foreground="#ff6b6b")
+        self.alarm_tree.tag_configure("msg", foreground="#66b3ff")
         self.alarm_tree.pack(fill="both", expand=True, pady=(4, 0))
         self.no_alarm_lbl = ttk.Label(af, text="No active alarms", style="Muted.TLabel")
         self.no_alarm_lbl.pack(anchor="w")
@@ -751,7 +752,10 @@ class App:
         for a in active:
             self.alarm_tree.insert("", "end", tags=("alarm",), values=(
                 datetime.fromtimestamp(a["started_at"]).strftime("%H:%M:%S"), a["path_name"], a["code"], a["message"]))
-        if active:
+        msgs = snap.get("messages") or []
+        for m in msgs:   # operator messages - information, not alarms
+            self.alarm_tree.insert("", "end", tags=("msg",), values=("", "", f"MSG{m.get('number') or ''}", m.get("text", "")))
+        if active or msgs:
             self.no_alarm_lbl.pack_forget()
         else:
             self.no_alarm_lbl.pack(anchor="w")

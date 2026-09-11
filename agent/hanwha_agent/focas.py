@@ -127,6 +127,12 @@ class ODBPRO(ctypes.Structure):  # cnc_rdprgnum (short variant)
     _fields_ = [("dummy", ctypes.c_short * 2), ("data", ctypes.c_short), ("mdata", ctypes.c_short)]
 
 
+class OPMSG(ctypes.Structure):  # cnc_rdopmsg: one operator message (external messages 2000-2099 on the 0i-F)
+    _pack_ = 4
+    _fields_ = [("datano", ctypes.c_short), ("type", ctypes.c_short), ("char_num", ctypes.c_short),
+                ("data", ctypes.c_char * 256)]
+
+
 class ODBCMD(ctypes.Structure):  # cnc_rdcommand (one commanded address, e.g. M92)
     _pack_ = 4
     _fields_ = [("adrs", ctypes.c_char), ("num", ctypes.c_char), ("flag", ctypes.c_short),
@@ -303,6 +309,7 @@ def load_library(configured: str | None = None):
         "cnc_rdexecprog": [US, P(US), P(S), P(ctypes.c_char)],
         "pmc_rdpmcrng": [US, S, S, US, US, US, P(IODBPMC)],
         "pmc_wrpmcrng": [US, S, P(IODBPMC)],
+        "cnc_rdopmsg": [US, S, S, ctypes.c_void_p],
         "cnc_wrmacro": [US, S, S, L, S],
     }
     for name, args in sigs.items():
@@ -403,6 +410,26 @@ class FocasMachine:
         t = IODBTIME()
         self._check("cnc_rdtimer", _lib.cnc_rdtimer(self.handle, 3, ctypes.byref(t)))  # 3 = cycle time
         return t.minute * 60 + t.msec / 1000.0
+
+    def op_messages(self, path: int) -> list[tuple[int, str]]:
+        """Operator messages on the CNC screen - not alarms (e.g. "1 hour to count end"): [(number, text)]."""
+        self.set_path(path)
+        size = ctypes.sizeof(OPMSG)
+        buf = (OPMSG * 5)()
+        ret = _lib.cnc_rdopmsg(self.handle, -1, size * 5, ctypes.byref(buf))   # -1 = all (up to 5)
+        if ret != 0:                                  # some controls only return one at a time
+            one = OPMSG()
+            self._check("cnc_rdopmsg", _lib.cnc_rdopmsg(self.handle, 0, size, ctypes.byref(one)))
+            buf = [one]
+        out = []
+        for m in buf:
+            if m.datano < 0:
+                continue
+            n = max(0, min(m.char_num, 256))
+            text = m.data[:n].decode("latin-1", errors="replace").strip() if n else _decode(m.data)
+            if text or m.datano > 0:
+                out.append((int(m.datano), text))
+        return out
 
     def program_numbers(self, path: int) -> tuple[int | None, int | None]:
         """(program executing right now - may be a subprogram like O9002, main program) via cnc_rdprgnum."""
@@ -590,6 +617,14 @@ class MockMachine:
 
     def program_numbers(self, path: int):
         return (9002, 1234) if (self.phase == "barchange" and path == 1) else (1234, 1234)
+
+    def op_messages(self, path: int) -> list[tuple[int, str]]:
+        left_s = (self.required - self.parts) * self.cycle_len
+        if 0 < left_s <= 1800:
+            return [(2002, "WORK COUNT END IN 30 MIN")]
+        if 0 < left_s <= 3600:
+            return [(2001, "WORK COUNT END IN 1 HOUR")]
+        return []
 
     def pmc_bytes(self, area: str, start: int, count: int) -> bytes:
         if area == "K" and start + count > 99:
