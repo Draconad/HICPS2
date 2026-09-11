@@ -186,7 +186,7 @@ struct SettingsView: View {
                         LabeledContent("Machine", value: s.machineName)
                         LabeledContent("Monitor PC", value: s.agentOnline ? "Online" : "Offline")
                     }
-                    Text("Installed from TestFlight? Builds expire after 90 days - each new push to GitHub makes a fresh one.")
+                    Text("Signed with your developer account: installs from iMazing/3uTools last about a year (TestFlight builds 90 days). Each push to GitHub makes a fresh build.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

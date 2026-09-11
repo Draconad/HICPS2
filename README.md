@@ -11,7 +11,7 @@ Remote status and alarm monitoring for the Hanwha XE35 (FANUC 0i-F), as a replac
 |---|---|
 | `agent/`  | Windows desktop app. Has a status window, settings, a log and a tray icon, and starts with Windows. |
 | `server/` | Docker container for Unraid. Python, with SQLite alarm history, a web dashboard on `:8420`, and Apple push for the iPhone. |
-| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built in the cloud and installed through TestFlight (or iLoader without a paid account). |
+| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built and signed in the cloud and installed with iMazing/3uTools (or iLoader without a paid account). |
 | `.github/workflows/` | Free cloud builds for the `.ipa` (on a Mac), the `.exe` (on Windows) and the Docker image. |
 
 ---
@@ -123,33 +123,31 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 
 ## 4. iPhone app
 
-### With the paid developer account: TestFlight + Apple push (recommended)
+### With the paid developer account: signed .ipa + Apple push (recommended)
 
-Every push to GitHub builds, signs and uploads the app to **TestFlight**. Your iPhone and iPad install it and update it from the TestFlight app. That means no sideloading, no 3-app limit and no 7-day expiry (TestFlight builds last 90 days). The server uses **Apple push** to keep the Live Activity, the Dynamic Island and alarm alerts up to date while the app is closed.
+With the paid account, GitHub **signs** the app for your registered iPhone and iPad. You install the `.ipa` it produces with **iMazing** or **3uTools** (no sideloading or re-signing). The signed app lasts **a year** and doesn't count towards any 3-app limit. The server uses **Apple push** to keep the Live Activity, the Dynamic Island and alarm alerts up to date while the app is closed.
 
-You only do this setup once.
+You only do this setup once. You **don't** need to create an app in App Store Connect or use TestFlight.
 
 **A. Apple Developer website** (developer.apple.com → Account)
-0. **Devices → +**: register your iPhone and iPad by their UDID. To find a UDID, plug the device into the PC and look under Device info in iMazing or 3uTools. The build's signing step needs at least one registered device.
+0. **Devices → +**: register your iPhone and iPad by UDID. To find a UDID, plug the device into the PC and look under Device info in iMazing or 3uTools. Only registered devices can install the app.
 1. **Identifiers → +**, App IDs → App. Register:
-   - Description `HiCPS-2`, Bundle ID (explicit) **`com.jtquayle.hicps2`**. Tick **Push Notifications** and **Time Sensitive Notifications**.
-   - A second App ID: `HiCPS-2 Widget`, **`com.jtquayle.hicps2.widget`**, with no capabilities.
+   - `HiCPS-2`, Bundle ID (explicit) **`com.jtquayle.hicps2`**. Tick **Push Notifications** and **Time Sensitive Notifications**.
+   - `HiCPS-2 Widget`, **`com.jtquayle.hicps2.widget`**, with no capabilities.
    - To use different IDs, change them in `ios/project.yml`, then set `APNS_TOPIC` on the server to match.
-2. **Keys → +**: name it `HiCPS push` and tick **Apple Push Notifications service (APNs)**. Download the **`AuthKey_XXXXXXXXXX.p8`** (you can only download it once) and note its **Key ID**.
+2. **Keys → +**: name it `HiCPS push` and tick **Apple Push Notifications service (APNs)**. Download **`AuthKey_XXXXXXXXXX.p8`** (you can only download it once) and note its **Key ID**. The server uses this key.
 3. Note your **Team ID**. It's under Membership details.
 
-**B. App Store Connect** (appstoreconnect.apple.com)
-1. **Apps → + → New App**: iOS, name `HiCPS-2` (add something to the name if it's taken), bundle ID `com.jtquayle.hicps2`, and any SKU. It stays private; never submit it for review, since the icon and name are Hanwha's.
-2. **Users and Access → Integrations → App Store Connect API → Team Keys → +**: name it `GitHub`, access **Admin** (needed so the build can create its own signing certificate). Download the `.p8`, then note its **Key ID** and the **Issuer ID** shown above the list.
-3. **TestFlight → Internal Testing → +**: create a group, add yourself, and turn on automatic distribution.
+**B. An API key so GitHub can sign builds** (appstoreconnect.apple.com → Users and Access → Integrations → App Store Connect API → Team Keys → +)
+- Name it `GitHub` with access **Admin**, which lets the build use an Apple-managed signing certificate so you never handle certificates yourself. Download the `.p8`, then note its **Key ID** and the **Issuer ID** shown above the list. You don't need to create an app.
 
 **C. GitHub**: in the HICPS2 repo, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
 
 | Secret | Value |
 |---|---|
-| `ASC_KEY_ID` | App Store Connect API Key ID (B2) |
-| `ASC_ISSUER_ID` | Issuer ID (B2) |
-| `ASC_KEY_P8` | open the B2 `.p8` in Notepad and paste **all** of it, including the BEGIN/END lines |
+| `ASC_KEY_ID` | API Key ID (B) |
+| `ASC_ISSUER_ID` | Issuer ID (B) |
+| `ASC_KEY_P8` | open the B `.p8` in Notepad and paste **all** of it, including the BEGIN/END lines |
 | `APPLE_TEAM_ID` | Team ID (A3) |
 
 **D. Unraid server** (for push)
@@ -158,16 +156,21 @@ You only do this setup once.
 3. Rebuild or update the container (this version installs two small Python packages for push). The log should say `push ON`.
 
 **E. Build and install**
-1. Run `push-to-github.bat`. When the iPhone build finishes it says *"uploaded to TestFlight"*.
-2. After Apple finishes processing it (about 5–15 minutes), install **TestFlight** from the App Store on your iPhone/iPad and install HiCPS-2 from there.
+1. Run `push-to-github.bat`. It downloads `build-out\HanwhaMonitor-bN.ipa`, now signed by Apple for your devices.
+2. Plug the iPhone into the PC. In **iMazing**: select the device → **Manage Apps → Device → Install .ipa**. In **3uTools**: **Apps → Install**. Choose the `.ipa`, then do the same for the iPad.
 3. Open HiCPS-2 → Settings: enter the server URL and allow notifications. **Push (Apple)** should say **Working**. Tap **Send test notification** to check.
 4. Delete the old sideloaded copy. The new one has a different bundle ID, so the two install side by side.
+
+Updates: push to GitHub, then install the new `.ipa` the same way. It installs over the old one and keeps your settings.
+New device: register its UDID (A0), push again so the signing includes it, then install.
 
 What push changes:
 - **The Live Activity stays current while the app is closed.** The server sends an update whenever the status, parts, cycle or alarms change, and a refresh every 10 minutes.
 - **Alarm notifications arrive even when the app is closed.** They're *Time Sensitive*, so they get through Focus modes. The stopped and off notifications follow your Settings toggles.
-- **The 8-hour limit is handled on iPhone and iPad (iOS/iPadOS 17.2 or later).** Just before iOS ends a Live Activity, the server ends it and starts a fresh one by push. It also starts one on its own when the machine changes state and none is showing.
+- **The 8-hour limit is handled on iOS/iPadOS 17.2 or later.** Just before iOS ends a Live Activity, the server ends it and starts a fresh one by push. It also starts one on its own when the machine changes state and none is showing, unless you've switched Live Activities off in Settings.
 - **The silent-audio trick is no longer needed.** It's off by default now.
+
+*Later, if you want automatic updates:* create the app in App Store Connect (**Apps → + → New App**, bundle ID `com.jtquayle.hicps2`). Then add a repository **variable** (Settings → Secrets and variables → Actions → Variables) `IOS_DISTRIBUTION` = `testflight`. From then on, builds go to TestFlight instead of producing an `.ipa`.
 
 ### Without push: iLoader (free Apple ID)
 
