@@ -60,17 +60,15 @@ With the Compose Manager plugin you can instead use `server/docker-compose.yml`.
 The image at `ghcr.io/draconad/hanwha-monitor-server` is private, like the repo. Give Unraid a read-only key to pull it:
 
 1. On GitHub, go to **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)**. Tick only **`read:packages`**, choose an expiry, and copy the token. It has to be a *classic* token, because GitHub's container registry doesn't accept fine-grained ones.
-2. In the Unraid terminal:
+2. In the Unraid terminal, log in once and keep a copy of the login on the flash drive:
    ```bash
-   mkdir -p /boot/config/ghcr
-   echo "PASTE_TOKEN_HERE" > /boot/config/ghcr/token
-   cat /boot/config/ghcr/token | docker login ghcr.io -u Draconad --password-stdin
+   echo "PASTE_TOKEN_HERE" | docker login ghcr.io -u Draconad --password-stdin
+   mkdir -p /boot/config/ghcr && cp /root/.docker/config.json /boot/config/ghcr/config.json
    ```
-3. Unraid's `/root` is wiped at every reboot, and that's where the login is kept. So re-login on boot by adding this line to the end of `/boot/config/go`:
+3. Unraid wipes `/root` at every reboot, and that's where Docker keeps the login. To restore it at boot, add this line to the end of `/boot/config/go`:
    ```bash
-   cat /boot/config/ghcr/token | docker login ghcr.io -u Draconad --password-stdin
+   mkdir -p /root/.docker && cp /boot/config/ghcr/config.json /root/.docker/config.json
    ```
-   (Or use the User Scripts plugin with "At Startup of Array".)
 4. **Docker → Add Container**: set the Repository to `ghcr.io/draconad/hanwha-monitor-server:latest` and fill in the rest from `server/unraid-template.xml`.
 
 To update after a new build, use **Force update** on the container. Unraid's "update available" check often can't see private images, but the pull itself works.
