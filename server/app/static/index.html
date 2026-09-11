@@ -51,7 +51,7 @@
   .camwrap { margin-top: 12px; }
   .cam { position: relative; background: #0a0a0a; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
          aspect-ratio: 16 / 9; max-width: 100%; }
-  .cam img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .cam img, .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #0a0a0a; }
   .cam .badge { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em;
                 padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.65); color: #fff; }
   .cam .badge.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -88,6 +88,7 @@
     <div class="cam">
       <div class="wait" id="camwait">Connecting to the camera…</div>
       <img id="camimg" alt="Machine camera">
+      <video id="camvid" muted autoplay playsinline hidden></video>
       <div class="badge" id="cambadge"></div>
     </div>
   </div>
@@ -184,28 +185,84 @@ fetch("auth/info").then(r => r.json()).then(i => {
   $("forget").hidden = !i.device_trusted;
   $("who").textContent = i.username ? `Logged in as ${i.username}` : "";
 }).catch(() => {});
-// ---- camera: MJPEG stream while the page is visible; the PC only streams while someone watches
-let camOn = false, camRetry = null;
+// ---- camera: smooth live video (HLS) while the page is visible; a still image until it starts.
+// The PC only streams while someone is watching, so it takes a couple of seconds to begin.
+const HLS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js";
+let camVisible = false, camUrl = null, hls = null, camPoll = null, stillTimer = null, camPlaying = false, noPlayer = false;
+const vid = $("camvid"), still = $("camimg");
+function loadScript(src) {
+  return new Promise(res => { const el = document.createElement("script"); el.src = src;
+    el.onload = () => res(true); el.onerror = () => res(false); document.head.appendChild(el); });
+}
+let hlsReady = null;
+function needHls() {
+  if (!hlsReady) hlsReady = (async () => window.Hls || (await loadScript("hls.min.js")) || (await loadScript(HLS_CDN)))();
+  return hlsReady;
+}
+function camDetach() {
+  if (hls) { hls.destroy(); hls = null; }
+  vid.removeAttribute("src"); vid.load();
+  camUrl = null; camPlaying = false; vid.hidden = true;
+}
+async function camAttach(url) {
+  camDetach();
+  camUrl = url;
+  if (vid.canPlayType("application/vnd.apple.mpegurl")) {        // Safari / iPhone / iPad: native HLS
+    vid.src = url;
+  } else {
+    await needHls();
+    noPlayer = !window.Hls || !Hls.isSupported();
+    if (noPlayer || camUrl !== url) { camBadge(); return; }
+    hls = new Hls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6, maxLiveSyncPlaybackRate: 1.5,
+                    backBufferLength: 10 });
+    hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { camDetach(); } });   // the next poll re-attaches
+    hls.loadSource(url);
+    hls.attachMedia(vid);
+  }
+  vid.play().catch(() => {});
+}
+vid.addEventListener("playing", () => { camPlaying = true; vid.hidden = false; $("camwait").hidden = true; camBadge(); });
+vid.addEventListener("waiting", () => { camPlaying = false; camBadge(); });
+function refreshStill() {
+  if (!camPlaying) still.src = "api/camera/frame.jpg" + (q ? q + "&" : "?") + "t=" + Date.now();
+}
+still.onload = () => { $("camwait").hidden = true; };
+let camInfo = null;
+function camBadge() {
+  const b = $("cambadge");
+  if (camPlaying) { b.className = "badge live"; b.textContent = "LIVE"; return; }
+  b.className = "badge";
+  const c = camInfo && camInfo.still;
+  b.textContent = noPlayer ? "Stills only - the video player didn't load" : camVisible && camInfo ? "Starting live video…" : (c && c.last_frame_at ? "Last image " + t(c.last_frame_at) : "");
+}
+async function camTick() {
+  try {
+    camInfo = await getJSON("api/camera/live" + q);        // also tells the server someone is watching
+    if (camInfo.ready && camInfo.url) {
+      const same = camUrl && camUrl.split("/").slice(-2, -1)[0] === camInfo.session;
+      if (!same) camAttach(camInfo.url);
+    } else if (camUrl && !camInfo.ready) {
+      camDetach();
+    }
+  } catch (e) {}
+  camBadge();
+}
 function camStart() {
-  if (camOn || document.hidden) return;
-  camOn = true;
-  $("camimg").src = "api/camera/stream" + (q ? q + "&" : "?") + "t=" + Date.now();
+  if (camVisible || document.hidden || $("camcard").hidden) return;
+  camVisible = true;
+  refreshStill(); camTick();
+  camPoll = setInterval(camTick, 2000);
+  stillTimer = setInterval(refreshStill, 3000);
 }
 function camStop() {
-  camOn = false;
-  clearTimeout(camRetry);
-  $("camimg").src = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";   // aborts the stream
+  camVisible = false;
+  clearInterval(camPoll); clearInterval(stillTimer);
+  camDetach(); camBadge();
 }
-$("camimg").onload = () => { $("camwait").hidden = true; };
-$("camimg").onerror = () => { if (!camOn) return; camOn = false; camRetry = setTimeout(camStart, 3000); };
 document.addEventListener("visibilitychange", () => document.hidden ? camStop() : camStart());
 function camUpdate(c) {
   if (!c || !c.available) { $("camcard").hidden = true; return; }
   $("camcard").hidden = false;
-  const live = c.age_s != null && c.age_s < 6;
-  const b = $("cambadge");
-  b.className = "badge" + (live ? " live" : "");
-  b.textContent = live ? "LIVE" : (c.last_frame_at ? "Last image " + t(c.last_frame_at) : "");
   camStart();
 }
 

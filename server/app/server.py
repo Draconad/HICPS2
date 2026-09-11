@@ -13,7 +13,8 @@ status to the iPhone app plus a small web dashboard.
   POST /api/push/unregister {token? , activity_id?}
   GET  /api/push/status     POST /api/push/test
   POST /api/camera/frame    (agent, image/jpeg)   GET /api/camera/frame.jpg   GET /api/camera/stream (MJPEG)
-  GET  /api/camera/status
+  GET  /api/camera/status   GET /api/camera/live -> token URL of the live HLS stream
+  PUT  /api/camera/hls/push/<session>/<file>  (agent's ffmpeg)   GET /api/camera/hls/v/<token>/<session>/<file>
   GET  /               web dashboard (needs a web login)      GET /login  login page
   GET  /auth/info   POST /auth/login {username,password,api_key?}   POST /auth/change   POST /auth/logout
 
@@ -26,6 +27,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -39,15 +41,15 @@ from urllib.parse import parse_qs, urlparse
 try:  # works both as "python app/server.py" and as a package import
     from apns import APNs
     from auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
-    from camera import MAX_FRAME, Camera
+    from camera import MAX_FRAME, Camera, LiveVideo
     from push import PushService
 except ImportError:  # pragma: no cover
     from .apns import APNs
     from .auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
-    from .camera import MAX_FRAME, Camera
+    from .camera import MAX_FRAME, Camera, LiveVideo
     from .push import PushService
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -361,6 +363,7 @@ def _kv_set_locked(k, v):
 
 push = PushService(db, _lock, APNs(), lambda: status(), _kv_get_locked, _kv_set_locked)
 camera = Camera(Path(DB_PATH).parent)
+video = LiveVideo()
 auth = Auth(db, _lock, reset=os.environ.get("RESET_LOGIN", "").strip().lower() in ("1", "true", "yes"))
 
 
@@ -399,9 +402,12 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (headers or {}).items():
             for item in (v if isinstance(v, list) else [v]):   # several Set-Cookie headers
                 self.send_header(k, item)
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+        try:
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True   # e.g. ffmpeg hangs up after a PUT without reading the reply
 
     def _json(self, obj, code: int = 200, headers: dict | None = None):
         self._send(code, json.dumps(obj).encode(), "application/json", headers)
@@ -427,6 +433,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _client_ip(self) -> str:
         return self.client_address[0] if self.client_address else "?"
+
+    def _raw_body(self, limit: int) -> bytes:
+        """Request body, including chunked transfer encoding (ffmpeg's HTTP PUT uses it)."""
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            out = bytearray()
+            while True:
+                size = int(self.rfile.readline(1024).split(b";")[0].strip() or b"0", 16)
+                if size == 0:
+                    while self.rfile.readline(1024) not in (b"\r\n", b"\n", b""):
+                        pass
+                    return bytes(out)
+                out += self.rfile.read(size)
+                self.rfile.readline(8)
+                if len(out) > limit:
+                    raise ValueError("body too large")
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > limit:
+            raise ValueError("body too large")
+        return self.rfile.read(length) if length > 0 else b""
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -509,6 +534,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             if self._auth_route(method, path):
                 return
+            if method == "GET" and path == "/hls.min.js":   # video player library (bundled into the image)
+                f = STATIC / "hls.min.js"
+                if not f.is_file():
+                    return self._json({"detail": "not bundled"}, 404)
+                return self._send(200, f.read_bytes(), "text/javascript", {"Cache-Control": "max-age=86400"})
+            if method == "GET" and path.startswith("/api/camera/hls/v/"):
+                return self._hls_view(path)
             if not path.startswith("/api/"):
                 return self._json({"detail": "not found"}, 404)
             if not self._authorised(qs):
@@ -591,7 +623,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, jpg, "image/jpeg", hdrs)
         if method == "GET" and path == "/api/camera/stream":
             return self._mjpeg()
+        if method == "GET" and path == "/api/camera/live":
+            camera.touch()
+            info = video.info()
+            if info["ready"]:
+                info["url"] = f"api/camera/hls/v/{video.token()}/{info['session']}/live.m3u8"
+            info["still"] = camera.info()
+            return self._json(info)
+        if path.startswith("/api/camera/hls/push/"):
+            parts = path.split("/")          # ['', 'api', 'camera', 'hls', 'push', session, file]
+            if len(parts) != 7 or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", parts[5]) \
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]{1,60}", parts[6]):
+                return self._json({"detail": "bad path"}, 400)
+            if method in ("PUT", "POST"):
+                video.put(parts[5], parts[6], self._raw_body(8_000_000))
+                return self._json({"ok": True, "live": camera.watched})
+            if method == "DELETE":
+                return self._json({"ok": True})
         return self._json({"detail": "not found"}, 404)
+
+    def _hls_view(self, path: str):
+        parts = path.split("/")          # ['', 'api', 'camera', 'hls', 'v', token, session, file]
+        if len(parts) != 8 or not video.token_ok(parts[5]):
+            return self._json({"detail": "link expired"}, 403)
+        camera.touch()
+        data, ctype = video.get(parts[6], parts[7])
+        if data is None:
+            return self._json({"detail": "gone"}, 404)
+        return self._send(200, data, ctype)
 
     def _mjpeg(self):
         """multipart/x-mixed-replace stream for <img src>. Re-sends the last frame every few seconds when nothing
@@ -627,6 +686,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._route("POST")
 
+    def do_PUT(self):
+        self._route("PUT")
+
     def do_DELETE(self):
         self._route("DELETE")
 
@@ -634,7 +696,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Content-Length", "0")
         self.end_headers()
 

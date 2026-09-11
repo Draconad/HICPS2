@@ -129,6 +129,25 @@ struct APIClient {
         return r.ok ? "Test sent to \(r.sent ?? 0) device(s)" : "Not sent: \(r.error?.isEmpty == false ? r.error! : "no devices registered")"
     }
 
+    struct CameraLive: Decodable {
+        var ready: Bool
+        var session: String?
+        var url: String?
+    }
+
+    /// Live video info. Asking also tells the server someone is watching, so the PC starts streaming.
+    func cameraLive() async throws -> CameraLive {
+        try await send(try request("/api/camera/live"), as: CameraLive.self)
+    }
+
+    /// Absolute URL for a server-relative path (the live video link is relative, e.g. "api/camera/hls/...").
+    func absoluteURL(_ path: String) -> URL? {
+        var base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !base.lowercased().hasPrefix("http") { base = "http://" + base }
+        while base.hasSuffix("/") { base.removeLast() }
+        return URL(string: base + "/" + path.drop(while: { $0 == "/" }))
+    }
+
     enum CameraFrame {
         case new(Data, etag: String?, frameTime: Double?)
         case unchanged

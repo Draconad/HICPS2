@@ -367,7 +367,6 @@ class App:
                 ("camera_address", "Camera IP address", "Tapo app: camera > Settings > Device Info, e.g. 192.168.11.15"),
                 ("camera_user", "Camera username", "Tapo app: camera > Settings > Advanced Settings > Camera Account"),
                 ("camera_password", "Camera password", ""),
-                ("camera_fps", "Frames per second", "While someone is watching (1-10). A still is sent every minute otherwise."),
                 ("ffmpeg_path", "ffmpeg.exe", "Leave blank if ffmpeg.exe is next to HanwhaMonitor.exe")):
             ttk.Label(page, text=label, style="Form.TLabel").grid(row=r, column=0, sticky="w", pady=(6, 0), padx=(0, 10))
             v = tk.StringVar(value=str(getattr(self.cfg, key)))
@@ -382,6 +381,14 @@ class App:
         self.vars["camera_hd"] = var
         ttk.Checkbutton(page, text="HD stream (sharper, about 4x the data - SD is fine for a glance)",
                         variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        r += 1
+        var = tk.BooleanVar(value=self.cfg.camera_transcode)
+        self.vars["camera_transcode"] = var
+        ttk.Checkbutton(page, text="Re-encode the video (only if it won't play - uses more CPU on this PC)",
+                        variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        r += 1
+        ttk.Label(page, text="Live video streams only while someone is watching; otherwise a still is sent every minute.",
+                  style="Hint.TLabel").grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
         r += 1
         btns = tk.Frame(page, bg=BG)
         btns.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 6))

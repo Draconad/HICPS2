@@ -1,16 +1,18 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
-/// Machine camera, relayed by the PC app through the server. While this tab is open the app fetches the
-/// latest frame about 4 times a second; the server sees that and tells the PC to stream live.
+/// Machine camera, relayed by the PC app through the server. While this tab is open the app asks the server for
+/// the live video every couple of seconds (which also tells the PC to stream), and plays it with AVPlayer.
+/// The latest still is shown until the video starts.
 struct CameraView: View {
     @EnvironmentObject var store: MachineStore
     @Environment(\.scenePhase) private var phase
+    @StateObject private var player = LivePlayer()
 
-    @State private var image: UIImage?
-    @State private var etag: String?
-    @State private var frameTime: Date?
-    @State private var lastNewFrame = Date.distantPast
+    @State private var still: UIImage?
+    @State private var stillEtag: String?
+    @State private var stillTime: Date?
     @State private var message: String?
     @State private var noCamera = false
 
@@ -24,23 +26,27 @@ struct CameraView: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .gesture(SimultaneousGesture(magnify, pan))
-                        .onTapGesture(count: 2) { resetZoom() }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
+                if still != nil || player.hasItem {
+                    ZStack {
+                        if let still {
+                            Image(uiImage: still).resizable().scaledToFit()
+                        }
+                        PlayerLayerView(player: player.player)
+                            .opacity(player.isPlaying ? 1 : 0)
+                    }
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(SimultaneousGesture(magnify, pan))
+                    .onTapGesture(count: 2) { resetZoom() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                 } else {
                     placeholder
                 }
             }
             .overlay(alignment: .topLeading) { badge.padding(12) }
             .overlay(alignment: .bottom) {
-                if let message, image != nil {
+                if let message, still != nil {
                     Text(message)
                         .font(.footnote)
                         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -54,31 +60,31 @@ struct CameraView: View {
         }
         // runs while the tab is visible and the app is in the foreground; cancelled otherwise
         .task(id: phase) {
-            guard phase == .active else { return }
-            await poll()
+            guard phase == .active else { player.stop(); return }
+            await run()
+            player.stop()
         }
+        .onDisappear { player.stop() }
     }
 
     // MARK: - pieces
 
-    private var isLive: Bool { Date().timeIntervalSince(lastNewFrame) < 3 }
-
     @ViewBuilder private var badge: some View {
-        if image != nil {
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                HStack(spacing: 6) {
-                    if isLive {
-                        Circle().fill(Color.red).frame(width: 8, height: 8)
-                        Text("LIVE").font(.caption.weight(.heavy))
-                    } else if let t = frameTime {
-                        Text("Last image \(t.formatted(date: .omitted, time: .standard))")
-                            .font(.caption.weight(.semibold))
-                    }
+        if still != nil || player.hasItem {
+            HStack(spacing: 6) {
+                if player.isPlaying {
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                    Text("LIVE").font(.caption.weight(.heavy))
+                } else if player.hasItem || !noCamera {
+                    ProgressView().controlSize(.mini).tint(.white)
+                    Text("Starting live video…").font(.caption.weight(.semibold))
+                } else if let t = stillTime {
+                    Text("Last image \(t.formatted(date: .omitted, time: .standard))").font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(.black.opacity(0.65), in: Capsule())
             }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(.black.opacity(0.65), in: Capsule())
         }
     }
 
@@ -127,31 +133,107 @@ struct CameraView: View {
 
     // MARK: - fetching
 
-    private func poll() async {
+    private func run() async {
+        var tick = 0
         while !Task.isCancelled {
-            var delay: UInt64 = 250_000_000
+            let api = APIClient.current
             do {
-                switch try await APIClient.current.cameraFrame(etag: etag) {
-                case let .new(data, newTag, ft):
-                    if let img = UIImage(data: data) {
-                        image = img
-                        etag = newTag
-                        lastNewFrame = Date()
-                        frameTime = ft.flatMap { store.status?.date($0) ?? Date(timeIntervalSince1970: $0) }
-                    }
-                    noCamera = false
-                    message = nil
-                case .unchanged:
-                    message = nil
-                case .noImage:
-                    noCamera = true
-                    delay = 3_000_000_000
+                // live video: the server hands out a link once the PC is streaming
+                let live = try await api.cameraLive()
+                if live.ready, let path = live.url, let url = api.absoluteURL(path) {
+                    player.play(url: url, session: live.session ?? path)
+                } else if !live.ready {
+                    player.stop()
                 }
+                // the still: straight away, then every few seconds until the video is playing
+                if !player.isPlaying && tick % 2 == 0 {
+                    switch try await api.cameraFrame(etag: stillEtag) {
+                    case let .new(data, tag, ft):
+                        if let img = UIImage(data: data) {
+                            still = img
+                            stillEtag = tag
+                            stillTime = ft.flatMap { store.status?.date($0) ?? Date(timeIntervalSince1970: $0) }
+                        }
+                        noCamera = false
+                    case .unchanged:
+                        break
+                    case .noImage:
+                        noCamera = true
+                    }
+                }
+                message = nil
             } catch {
                 message = error.localizedDescription
-                delay = 3_000_000_000
             }
-            try? await Task.sleep(nanoseconds: delay)
+            tick += 1
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
+    }
+}
+
+// MARK: - player
+
+/// Owns the AVPlayer for the live HLS stream and reports whether video is actually playing.
+@MainActor
+final class LivePlayer: ObservableObject {
+    let player = AVPlayer()
+    @Published private(set) var isPlaying = false
+    @Published private(set) var hasItem = false
+    private var session: String?
+    private var observation: NSKeyValueObservation?
+
+    init() {
+        player.isMuted = true
+        player.automaticallyWaitsToMinimizeStalling = true
+        observation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] p, _ in
+            let playing = p.timeControlStatus == .playing
+            Task { @MainActor in self?.isPlaying = playing }
+        }
+    }
+
+    func play(url: URL, session: String) {
+        guard session != self.session else {
+            if player.timeControlStatus == .paused { player.play() }
+            return
+        }
+        self.session = session
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 1
+        item.automaticallyPreservesTimeOffsetFromLive = true
+        item.configuredTimeOffsetFromLive = CMTime(seconds: 2, preferredTimescale: 600)
+        player.replaceCurrentItem(with: item)
+        hasItem = true
+        player.play()
+    }
+
+    func stop() {
+        guard session != nil || player.currentItem != nil else { return }
+        session = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        hasItem = false
+        isPlaying = false
+    }
+}
+
+/// AVPlayerLayer in SwiftUI, without playback controls.
+struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    final class View: UIView {
+        override static var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+
+    func makeUIView(context: Context) -> View {
+        let v = View()
+        v.backgroundColor = .clear
+        v.playerLayer.videoGravity = .resizeAspect
+        v.playerLayer.player = player
+        return v
+    }
+
+    func updateUIView(_ uiView: View, context: Context) {
+        if uiView.playerLayer.player !== player { uiView.playerLayer.player = player }
     }
 }

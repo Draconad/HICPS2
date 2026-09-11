@@ -76,3 +76,90 @@ class Camera:
         return {"available": self.jpg is not None, "last_frame_at": self.frame_time,
                 "age_s": round(age, 1) if age is not None else None,
                 "live": bool(age is not None and age < 5 and self.watched), "watched": self.watched}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Live video: the agent pushes HLS (the camera's own H.264, not re-encoded) with ffmpeg's HTTP PUT output.
+# Viewers get time-limited token URLs, so the iPhone player and <video> tags need no headers.
+# ---------------------------------------------------------------------------------------------------------------
+import hashlib as _hashlib
+import hmac as _hmac
+import re as _re
+import secrets as _secrets
+
+HLS_KEEP = 12            # segments kept per session (the playlist lists ~6)
+HLS_STALE = 12           # a session with no playlist update for this long has ended
+TOKEN_TTL = 3 * 3600
+
+
+class LiveVideo:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.session: str | None = None
+        self.playlist: bytes | None = None
+        self.segments: dict[str, bytes] = {}
+        self.order: list[str] = []
+        self.updated = 0.0
+        self.started = 0.0
+        self._secret = _secrets.token_bytes(32)   # tokens stop working after a restart; clients just ask again
+
+    # ---- from the agent
+    def put(self, session: str, name: str, data: bytes):
+        now = time.time()
+        with self.lock:
+            if session != self.session:   # the agent runs one stream at a time: a new session replaces the old
+                self.session, self.playlist = session, None
+                self.segments.clear()
+                self.order.clear()
+                self.started = now
+                log.info("Live video session %s started", session)
+            if name.endswith(".m3u8"):
+                self.playlist = self._rewrite(data)
+                self.updated = now
+            else:
+                self.segments[name] = data
+                self.order.append(name)
+                while len(self.order) > HLS_KEEP:
+                    self.segments.pop(self.order.pop(0), None)
+
+    def delete(self, session: str, name: str):
+        pass   # ffmpeg deletes old segments; we already keep only the last few
+
+    @staticmethod
+    def _rewrite(data: bytes) -> bytes:
+        """Make every segment URI a bare file name, so it resolves under the viewer's token URL."""
+        out = []
+        for line in data.decode("utf-8", "replace").splitlines():
+            if line and not line.startswith("#"):
+                line = line.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+            out.append(line)
+        return ("\n".join(out) + "\n").encode()
+
+    # ---- viewers
+    @property
+    def ready(self) -> bool:
+        return bool(self.playlist) and time.time() - self.updated < HLS_STALE and len(self.order) >= 2
+
+    def token(self) -> str:
+        exp = int(time.time()) + TOKEN_TTL
+        sig = _hmac.new(self._secret, str(exp).encode(), _hashlib.sha256).hexdigest()[:32]
+        return f"{exp}-{sig}"
+
+    def token_ok(self, token: str) -> bool:
+        m = _re.fullmatch(r"(\d{9,11})-([0-9a-f]{32})", token or "")
+        if not m or int(m.group(1)) < time.time():
+            return False
+        good = _hmac.new(self._secret, m.group(1).encode(), _hashlib.sha256).hexdigest()[:32]
+        return _hmac.compare_digest(good, m.group(2))
+
+    def get(self, session: str, name: str) -> tuple[bytes | None, str]:
+        with self.lock:
+            if session != self.session:
+                return None, ""
+            if name.endswith(".m3u8"):
+                return self.playlist, "application/vnd.apple.mpegurl"
+            return self.segments.get(name), "video/mp2t"
+
+    def info(self) -> dict:
+        return {"session": self.session if self.ready else None, "ready": self.ready,
+                "age_s": round(time.time() - self.updated, 1) if self.updated else None}

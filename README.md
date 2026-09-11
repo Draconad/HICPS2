@@ -140,7 +140,11 @@ The PC app reads the camera on the machine's network and sends it to the server.
    3. Tick **Send the camera to the dashboard and iPhone app**, then click **Save & apply**.
 4. It's worth giving the camera a fixed IP address (a DHCP reservation in the router) so the address doesn't change.
 
-**Data use:** while nobody is watching, one still image is sent every minute (about 20-40 KB). While the dashboard or the app's Camera tab is open, it streams at the **Frames per second** setting (default 4). The low-res stream uses roughly 100-200 KB/s, and it stops about 20 s after the last viewer leaves. **HD stream** is sharper but uses about 4x the data.
+**How it plays:** while the dashboard or the app's Camera tab is open, the PC app passes the camera's own video straight through to the server, without re-encoding, so the PC barely notices. You get smooth, full-frame-rate video in the browser and the app, a few seconds behind real time. It takes 2-3 s to start, and the latest still shows until then. While nobody is watching, one still is sent every minute.
+
+**Data use:** SD video is roughly 0.3-0.6 Mbit/s, HD roughly 1.5-2.5 Mbit/s, and only while someone is watching. It stops about 20 s after the last viewer leaves.
+
+If the video never starts but stills work, the camera may be sending H.265. Tick **Re-encode the video** in the Camera tab. That converts it on the PC and uses more CPU there.
 
 **If the camera test fails:**
 - **"rejected the username/password":** use the Camera Account from step 1, not your TP-Link account.

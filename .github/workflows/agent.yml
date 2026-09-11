@@ -37,7 +37,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
           try {
-            Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip" -OutFile $zip
+            Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip
           } catch {
             Write-Host "BtbN build not available ($_), trying gyan.dev"
             Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip

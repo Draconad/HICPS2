@@ -1,8 +1,9 @@
 """Camera relay: reads the Tapo camera's RTSP stream with ffmpeg and posts JPEG frames to the server.
 
-Idle (nobody watching): one still every IDLE_SNAPSHOT seconds.
-Live (the server says someone has the dashboard or app camera open): a continuous stream at cfg.camera_fps.
-Frames go out latest-wins, so a slow link drops frames instead of building a backlog.
+Idle (nobody watching): one JPEG still every IDLE_SNAPSHOT seconds.
+Live (the server says someone has the dashboard or app camera open): the camera's own H.264 video is passed through
+untouched (no re-encoding - next to no CPU) as HLS, pushed to the server with ffmpeg's HTTP PUT output, plus a
+still every LIVE_STILL seconds for the poster image. The server serves it to the browser / iPhone as smooth video.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import quote
 
@@ -24,7 +26,8 @@ log = logging.getLogger("hanwha.camera")
 
 IDLE_SNAPSHOT = 60      # seconds between stills while nobody is watching
 LIVE_LINGER = 10        # keep streaming this long after the last "someone's watching" from the server
-MAX_WIDTH = 1280        # HD frames are scaled down to this width
+MAX_WIDTH = 1280        # stills are scaled down to this width
+LIVE_STILL = 3          # seconds between stills while streaming video
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW: no console flashing up
 
 
@@ -64,6 +67,10 @@ def _redact(text: str) -> str:
 
 def _explain(err: str) -> str:
     e = err.lower()
+    if "[http @" in e or "http error" in e:   # the video upload to the server, not the camera
+        if "401" in e:
+            return "The server rejected the API key for the video upload."
+        return "Couldn't upload the video to the server: " + (err.strip().splitlines() or [""])[-1][:150]
     if "401" in e or "unauthorized" in e:
         return "The camera rejected the username/password (use the Camera Account from the Tapo app, not your Tapo login)."
     if "connection refused" in e or "10061" in e:
@@ -131,6 +138,28 @@ class CameraRelay:
         cmd += (["-frames:v", "1"] if single else []) + ["-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]
         return cmd
 
+    def _live_cmd(self, session: str) -> list[str] | None:
+        """Video passthrough to the server as HLS (1 s segments), plus stills on stdout."""
+        ff = find_ffmpeg(self.cfg)
+        if not ff:
+            return None
+        if self.cfg.camera_transcode:   # only if the camera's own video won't play (e.g. H.265)
+            kbps = 1500 if self.cfg.camera_hd else 600
+            video = ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+                     "-g", "30", "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps}k",
+                     "-vf", f"scale='min({MAX_WIDTH},iw)':-2"]
+        else:
+            video = ["-c:v", "copy"]
+        push = f"{self.server}/api/camera/hls/push/{session}/live.m3u8"
+        headers = ["-headers", f"X-API-Key: {self.cfg.api_key}\r\n"] if self.cfg.api_key else []
+        return ([ff, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "8000000",
+                 "-i", camera_url(self.cfg),
+                 "-map", "0:v:0", "-an"] + video +
+                ["-f", "hls", "-hls_time", "1", "-hls_list_size", "6", "-hls_flags", "delete_segments+independent_segments",
+                 "-method", "PUT", "-http_persistent", "0"] + headers + [push] +
+                ["-map", "0:v:0", "-an", "-vf", f"fps=1/{LIVE_STILL},scale='min({MAX_WIDTH},iw)':-2", "-q:v", "5",
+                 "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"])
+
     def _spawn(self, cmd: list[str]) -> subprocess.Popen:
         return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 creationflags=NO_WINDOW, bufsize=0)
@@ -178,7 +207,10 @@ class CameraRelay:
 
     def _run_ffmpeg(self, single: bool) -> bool:
         """One ffmpeg session. Returns True if at least one frame came through."""
-        cmd = self._ffmpeg_cmd(single)
+        cmd = self._ffmpeg_cmd(single) if single else self._live_cmd(uuid.uuid4().hex[:10])
+        if not self.server and not single:
+            self.status, self.error = "Error", "Set the server URL first."
+            return False
         if cmd is None:
             self.status, self.error = "ffmpeg.exe not found", "Put ffmpeg.exe next to HanwhaMonitor.exe (it comes with the download)."
             return False
@@ -194,19 +226,21 @@ class CameraRelay:
         errs: list[str] = []
         threading.Thread(target=lambda: errs.extend(proc.stderr.read().decode("utf-8", "replace").splitlines()),
                          daemon=True).start()
-        got = False
+        got = stopped_by_us = False
         for jpg in self._frames(proc):
             got = True
             self._got_frame(jpg)
-            if single:
-                break
-            if time.time() > self._live_until:   # nobody watching any more
+            if single or time.time() > self._live_until:   # one still wanted / nobody watching any more
+                stopped_by_us = True
                 break
         self._kill()
-        if not got and not self._stop.is_set():
+        if self._stop.is_set():
+            return got
+        if not got or (not single and not stopped_by_us):   # ffmpeg gave up by itself
             time.sleep(0.3)
             self.error = _explain(_redact("\n".join(errs)))
-        return got
+            return False
+        return True
 
     def _run(self):
         log.info("Camera relay started (%s)", _redact(camera_url(self.cfg)))
