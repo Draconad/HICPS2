@@ -65,6 +65,12 @@ struct MachineLiveActivity: Widget {
                     }
                     .padding(.leading, 4)
                 }
+                DynamicIslandExpandedRegion(.center) {
+                    Text(context.attributes.machineName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(s.partsText)
                         .font(.headline.monospacedDigit())
@@ -141,10 +147,16 @@ struct LockScreenView: View {
                     Text(s.state.label.uppercased())
                         .font(.subheadline.weight(.heavy))
                         .foregroundStyle(color)
+                    if !s.program.isEmpty {
+                        Text(s.program)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
                     Spacer()
-                    Text(s.program.isEmpty ? name : s.program)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.65))
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(1)
                 }
 
