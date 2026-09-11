@@ -20,7 +20,13 @@ struct ProgramListView: View {
             }
             Section {
                 ForEach(list) { p in
-                    NavigationLink(value: p.program) { ProgramRow(p: p) }
+                    // a plain destination link: mixing value-based links with this screen being pushed from
+                    // Settings made the navigation bounce back and forth
+                    NavigationLink {
+                        ProgramDetailView(key: p.program) { Task { await load() } }
+                    } label: {
+                        ProgramRow(p: p)
+                    }
                 }
                 if list.isEmpty && !loading && error == nil {
                     Text("No programs yet – they appear once one has been loaded on the machine.")
@@ -31,9 +37,6 @@ struct ProgramListView: View {
             }
         }
         .navigationTitle("Program info")
-        .navigationDestination(for: String.self) { key in
-            ProgramDetailView(key: key) { Task { await load() } }
-        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { newKey = ""; adding = true } label: { Image(systemName: "plus") }
@@ -52,8 +55,16 @@ struct ProgramListView: View {
         .overlay { if loading && list.isEmpty { ProgressView() } }
         .refreshable { await load() }
         .task { await load() }
-        .navigationDestination(item: $openKey) { key in
-            ProgramDetailView(key: key) { Task { await load() } }
+        // a new program opens as a sheet (a pushed destination here would upset the Settings navigation)
+        .sheet(isPresented: Binding(get: { openKey != nil }, set: { if !$0 { openKey = nil } })) {
+            if let key = openKey {
+                NavigationStack {
+                    ProgramDetailView(key: key) { Task { await load() } }
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) { Button("Done") { openKey = nil } }
+                        }
+                }
+            }
         }
     }
 
