@@ -11,7 +11,7 @@ Remote status and alarm monitoring for the Hanwha XE35 (FANUC 0i-F), as a replac
 |---|---|
 | `agent/`  | Windows desktop app. Has a status window, settings, a log and a tray icon, and starts with Windows. |
 | `server/` | Docker container for Unraid. Pure Python, no dependencies, with SQLite alarm history and a web dashboard on `:8420`. |
-| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built in the cloud and sideloaded with Sideloadly. |
+| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built in the cloud and sideloaded with iLoader. |
 | `.github/workflows/` | Free cloud builds for the `.ipa` (on a Mac), the `.exe` (on Windows) and the Docker image. |
 
 ---
@@ -120,12 +120,11 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 
 ---
 
-## 4. iPhone app (Sideloadly, free Apple ID)
+## 4. iPhone app (iLoader, free Apple ID)
 
 1. On the iPhone, turn on **Settings → Privacy & Security → Developer Mode**. The phone restarts.
-2. In Sideloadly on your PC, drop in `HanwhaMonitor.ipa`, enter your Apple ID and click **Start**.
-   In Advanced options, **leave "Remove app extensions" unticked**. The Live Activity lives in an extension.
-   Also **untick "Use automatic bundle ID"**. The project already uses the ID Sideloadly would pick (`local.hanwhamonitor.app.8Y4JQ37DYS`); letting Sideloadly rename it breaks the link between the app and its Live Activity extension.
+2. Install `HanwhaMonitor-bN.ipa` with **iLoader** and your Apple ID.
+   > **Don't use Sideloadly for this app.** Sideloadly signs the Live Activity extension in a way iOS rejects (`AMFI: … has entitlements but is not a main binary`). The app still runs, but the Live Activity, the Dynamic Island and widgets never appear. iLoader signs it correctly. RED-TOK's Dynamic Island has the same problem and the same fix.
 3. On the phone, go to **Settings → General → VPN & Device Management** → trust your Apple ID.
 4. Open **XE35 Monitor** → **Settings**:
    - Enter the server URL `http://<unraid-ip>:8420` → **Test connection**. Allow local network access when asked.
@@ -151,7 +150,7 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 
 - **No Apple push notifications.** The server can't wake the phone, so the app keeps itself running in the background by playing *silent audio*. This mixes with music, so it doesn't interrupt anything. That's what keeps the Live Activity and alarm notifications live. You can turn it off in Settings to save battery. If iOS ever kills the app, the Live Activity greys out, and a background refresh roughly every 15 minutes is the fallback.
 - **8-hour Live Activity limit.** iOS ends every Live Activity after 8 hours. The app replaces it whenever you open the app. If it's been running all day, you'll get a reminder notification to open the app.
-- **7-day signing.** Free-signed apps stop launching after 7 days. Turn on Sideloadly's auto-refresh (it runs on your PC over Wi-Fi) or re-sideload weekly.
+- **7-day signing.** Free-signed apps stop launching after 7 days. Re-install with iLoader (it can refresh apps for you) at least weekly.
 - **Network.** The phone needs to reach Unraid: either be on the home Wi-Fi, or run Tailscale on the phone (section 2b) so it works from anywhere.
 
 A paid Apple Developer account ($99/yr) would remove the first three limits. The server would then push updates through Apple instead, and the app would need a small extension to support that.
