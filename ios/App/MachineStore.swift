@@ -15,6 +15,8 @@ final class MachineStore: ObservableObject {
     private var loop: Task<Void, Never>?
     private var previousState: MachineStateKind?
     private var isForeground = true
+    /// For the Settings diagnostics: proves the app is still alive while locked.
+    private(set) var lastBackgroundPoll: Date?
 
     var machineName: String { status?.machineName ?? "Hanwha XE35" }
     var reachable: Bool { error == nil && status != nil }
@@ -24,6 +26,8 @@ final class MachineStore: ObservableObject {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
+                if AppSettings.keepAlive { BackgroundKeeper.shared.ensurePlaying() }
+                if !self.isForeground { self.lastBackgroundPoll = Date() }
                 await self.refresh()
                 let wait = self.isForeground ? AppSettings.pollInterval : AppSettings.backgroundInterval
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))

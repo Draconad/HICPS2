@@ -106,6 +106,9 @@ struct SettingsView: View {
                     Stepper(value: $pollInterval, in: 1...30, step: 1) {
                         LabeledContent("Refresh while open", value: "\(Int(pollInterval)) s")
                     }
+                    Text(keeperDiagnostics)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
                 } header: {
                     Text("Updates")
                 } footer: {
@@ -162,6 +165,18 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var keeperDiagnostics: String {
+        let k = BackgroundKeeper.shared
+        var parts = ["silent audio \(k.isRunning ? (k.isPlaying ? "playing" : "PAUSED") : "off")"]
+        if let t = store.lastBackgroundPoll {
+            parts.append("last locked poll \(t.formatted(date: .omitted, time: .standard))")
+        }
+        if k.stopCount > 0, let d = k.lastStopDate {
+            parts.append("stopped \(k.stopCount)x, last: \(k.lastStopReason) at \(d.formatted(date: .omitted, time: .shortened))")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func test() async {

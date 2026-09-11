@@ -136,7 +136,8 @@ final class LiveActivityManager: ObservableObject {
 
     private func staleDate() -> Date {
         // If nothing new arrives in this time, the widget greys itself out ("No update since …").
-        Date().addingTimeInterval(max(60, AppSettings.backgroundInterval * 6))
+        // Generous, so a brief Wi-Fi blip or a slow poll doesn't grey the card out.
+        Date().addingTimeInterval(max(180, AppSettings.backgroundInterval * 12))
     }
 
     /// Called after every poll.

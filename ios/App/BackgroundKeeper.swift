@@ -13,13 +13,40 @@ final class BackgroundKeeper {
     private var observers: [NSObjectProtocol] = []
     private(set) var isRunning = false
 
+    /// Diagnostics shown in Settings.
+    private(set) var stopCount = 0
+    private(set) var lastStopReason = "none"
+    private(set) var lastStopDate: Date?
+
+    var isPlaying: Bool { player?.isPlaying ?? false }
+
+    private func noteStop(_ reason: String) {
+        stopCount += 1
+        lastStopReason = reason
+        lastStopDate = Date()
+    }
+
     private init() {
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let self, self.isRunning,
                   let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-            self.resume()
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            if type == .began {
+                self.noteStop("interrupted by another app / call")
+            } else {
+                self.resume()
+            }
+        })
+        // AirPods taken out, switched to another device, Bluetooth dropping, etc. pause the player
+        // automatically - and a paused app gets suspended a few seconds later. Restart it every time.
+        observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            guard let self, self.isRunning else { return }
+            if let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+               AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable {
+                self.noteStop("audio device disconnected")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.ensurePlaying() }
         })
         observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self, self.isRunning else { return }
@@ -31,6 +58,13 @@ final class BackgroundKeeper {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        resume()
+    }
+
+    /// Called on every poll: if anything paused the silent audio, start it again before iOS suspends us.
+    func ensurePlaying() {
+        guard isRunning, !(player?.isPlaying ?? false) else { return }
+        if lastStopDate == nil || Date().timeIntervalSince(lastStopDate!) > 2 { noteStop("found paused") }
         resume()
     }
 
