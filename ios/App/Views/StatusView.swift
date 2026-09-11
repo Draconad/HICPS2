@@ -3,6 +3,10 @@ import UIKit
 
 struct StatusView: View {
     @EnvironmentObject var store: MachineStore
+    @Environment(\.scenePhase) private var phase
+    @StateObject private var camera = CameraModel()
+    @State private var cameraFullScreen = false
+    @AppStorage(SettingsKey.showCamera) private var showCamera = true
 
     var body: some View {
         NavigationStack {
@@ -13,6 +17,14 @@ struct StatusView: View {
                     }
                     if let s = store.status {
                         StateHeader(s: s)
+                        if showCamera && s.camera?.available == true {
+                            CameraPanel(model: camera, player: camera.player, features: s.camera) {
+                                cameraFullScreen = true
+                            }
+                            if s.camera?.ptz == true, let presets = s.camera?.presets, !presets.isEmpty {
+                                PresetBar(model: camera, presets: presets)
+                            }
+                        }
                         HStack(spacing: 14) {
                             PartsCard(s: s)
                             CycleCard(s: s)
@@ -32,6 +44,16 @@ struct StatusView: View {
             .background(Color(.systemGroupedBackground))
             .refreshable { await store.refresh() }
             .navigationTitle(store.status?.machineName ?? "Machine")
+        }
+        // the camera only streams while this screen is showing and the app is in the foreground
+        .task(id: phase) {
+            guard phase == .active, showCamera else { return }
+            await camera.run(store: store)
+        }
+        .fullScreenCover(isPresented: $cameraFullScreen) {
+            CameraFullScreen(model: camera, features: store.status?.camera)
+                .environmentObject(store)
+                .task { await camera.run(store: store) }   // keeps the video going while the cover is up
         }
     }
 }

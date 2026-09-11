@@ -46,7 +46,7 @@ final class AlarmHistoryModel: ObservableObject {
 struct AlarmsView: View {
     @EnvironmentObject var store: MachineStore
     @StateObject private var model = AlarmHistoryModel()
-    @State private var filter = 0
+    @State private var filter = 1   // opens on Active alarms
     @State private var selected: AlarmEvent?
 
     var body: some View {

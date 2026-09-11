@@ -302,6 +302,8 @@ def load_library(configured: str | None = None):
         "cnc_rdcommand": [US, S, S, P(S), P(ODBCMD)],
         "cnc_rdexecprog": [US, P(US), P(S), P(ctypes.c_char)],
         "pmc_rdpmcrng": [US, S, S, US, US, US, P(IODBPMC)],
+        "pmc_wrpmcrng": [US, S, P(IODBPMC)],
+        "cnc_wrmacro": [US, S, S, L, S],
     }
     for name, args in sigs.items():
         fn = getattr(lib, name)
@@ -464,6 +466,36 @@ class FocasMachine:
         self._check("pmc_rdpmcrng", ret)
         return bytes(buf.cdata[:count])
 
+    # -- writes (only used for the app's Controls tab, and only if "Allow remote changes" is ticked) ----
+    def write_macro(self, path: int, number: int, value: float):
+        self.set_path(path)
+        dec = 0 if float(value).is_integer() else 3
+        self._check("cnc_wrmacro", _lib.cnc_wrmacro(self.handle, number, 10, int(round(value * 10 ** dec)), dec))
+
+    def write_pmc_byte(self, area: str, number: int, value: int):
+        buf = IODBPMC()
+        buf.type_a, buf.type_d, buf.datano_s, buf.datano_e = PMC_AREAS[area], 0, number, number
+        buf.cdata[0] = value & 0xFF
+        self._check("pmc_wrpmcrng", _lib.pmc_wrpmcrng(self.handle, 8 + 1, ctypes.byref(buf)))
+
+    def write_signal(self, sig, on: bool):
+        """Set a parsed signal (see parse_signal) to on/off. Only keep relays (K), data table (D) and macro variables:
+        other areas are driven by the ladder or the machine and must never be written from outside."""
+        inv, area, num, bit = sig
+        want = on != inv
+        if area == "#":
+            self.write_macro(1, num, 1 if want else 0)
+            return
+        if area not in ("K", "D"):
+            raise ValueError(f"Won't write {area} addresses - only K (keep relays), D or # variables")
+        cur = self.pmc_bytes(area, num, 1)[0]
+        if bit is None:
+            new = 1 if want else 0
+        else:
+            new = (cur | (1 << bit)) if want else (cur & ~(1 << bit))
+        if new != cur:
+            self.write_pmc_byte(area, num, new)
+
     def read_signal(self, sig) -> bool:
         """Current state of a parsed signal (see parse_signal)."""
         inv, area, num, bit = sig
@@ -506,6 +538,7 @@ class MockMachine:
         self.phase = "running"
         self.phase_until = time.time() + 120
         self.alarm: RawAlarm | None = None
+        self.work_counter = True
 
     def connect(self):
         self.connected = True
@@ -564,7 +597,7 @@ class MockMachine:
         if area not in ("K", "R", "X"):
             raise FocasError("pmc_rdpmcrng", 3)
         data = bytearray(count)
-        if area == "K" and start <= 5 < start + count:
+        if area == "K" and start <= 5 < start + count and self.work_counter:
             data[5 - start] = 0x08          # K5.3 = demo "work counter stop" on
         if area == "X" and start <= 8 < start + count:
             data[8 - start] = 0x20 if self.phase == "running" else 0
@@ -574,8 +607,20 @@ class MockMachine:
         inv, area, num, bit = sig
         if area == "#":
             return bool(self.macro(1, num)) != inv
-        b = self.pmc_bytes(area, num, 1)[0]
-        return (bool(b >> bit & 1) if bit is not None else b != 0) != inv
+        return self.work_counter != inv if (area, num) == ("K", 5) else False
+
+    def write_macro(self, path: int, number: int, value: float):
+        if number == 3902:
+            self.required = int(value)
+        elif number == 3901:
+            self.parts = int(value)
+
+    def write_signal(self, sig, on: bool):
+        inv, area, num, bit = sig
+        if area not in ("K", "D", "#"):
+            raise ValueError(f"Won't write {area} addresses - only K (keep relays), D or # variables")
+        if (area, num) == ("K", 5):
+            self.work_counter = on
 
     def exec_block(self, path: int) -> str:
         if self.phase == "barchange" and path == 1:

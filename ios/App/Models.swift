@@ -72,6 +72,27 @@ struct MachineStatus: Decodable, Equatable {
     var barChangeSince: Double?
     /// Work counter "stop at required count" switch: nil = not set up in the monitor
     var workCounter: Bool?
+    var camera: CameraInfo?
+    var controls: ControlsInfo?
+
+    struct CameraInfo: Decodable, Equatable {
+        var available: Bool?
+        var ptz: Bool?
+        var audio: Bool?
+        var presets: [Preset]?      // positions saved in the Tapo app
+    }
+
+    struct Preset: Decodable, Equatable, Hashable {
+        var token: String
+        var name: String
+    }
+
+    /// What the PC app allows the Controls tab to change.
+    struct ControlsInfo: Decodable, Equatable {
+        var remote: Bool?               // "Allow remote changes" ticked on the PC
+        var workCounterSignal: Bool?    // the stop-at-count address has been set up
+        var connected: Bool?            // the PC's command link to the server is up
+    }
 
     /// Seconds to add to server timestamps to get phone time (clock drift between Unraid and the phone).
     var clockOffset: Double = 0
@@ -79,7 +100,7 @@ struct MachineStatus: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case serverTime, machineName, state, stateDetail, stateSince, agentOnline, agentLastSeen, machineConnected,
              demo, parts, partsRequired, partsTotal, lastCycleS, cycleTimerS, cycleStartedAt, etaS, program, paths,
-             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter
+             activeAlarms, alarmsToday, barChange, barChangeSince, workCounter, camera, controls
     }
 
     func date(_ serverEpoch: Double?) -> Date? {

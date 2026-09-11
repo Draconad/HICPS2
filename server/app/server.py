@@ -13,6 +13,8 @@ status to the iPhone app plus a small web dashboard.
   POST /api/push/unregister {token? , activity_id?}
   GET  /api/push/status     POST /api/push/test
   POST /api/camera/frame    (agent, image/jpeg)   GET /api/camera/frame.jpg   GET /api/camera/stream (MJPEG)
+  POST /api/commands {type: ptz|set_required|set_work_counter, ...} -> result from the PC (waits up to ~8 s)
+  GET  /api/agent/commands?wait=25 (agent long-poll)   POST /api/agent/results {id, ok, message}
   GET  /api/camera/status   GET /api/camera/live -> token URL of the live HLS stream
   PUT  /api/camera/hls/push/<session>/<file>  (agent's ffmpeg)   GET /api/camera/hls/v/<token>/<session>/<file>
   GET  /               web dashboard (needs a web login)      GET /login  login page
@@ -42,14 +44,16 @@ try:  # works both as "python app/server.py" and as a package import
     from apns import APNs
     from auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
     from camera import MAX_FRAME, Camera, LiveVideo
+    from commands import ALLOWED, Commands
     from push import PushService
 except ImportError:  # pragma: no cover
     from .apns import APNs
     from .auth import COOKIE, DEVICE_COOKIE, DEVICE_DAYS, SESSION_DAYS, Auth
     from .camera import MAX_FRAME, Camera, LiveVideo
+    from .commands import ALLOWED, Commands
     from .push import PushService
 
-VERSION = "1.6.3"
+VERSION = "1.7.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -320,7 +324,8 @@ def status() -> dict:
             "bar_change_since": meta.get("bar_change_since") if bar_change else None,
             # work counter "stop at required count" switch: True/False, None = not set up on the monitor PC
             "work_counter": latest.get("work_counter") if state != "off" else None,
-            "camera": camera.info(),
+            "camera": dict(camera.info(), **(latest.get("camera_features") or {})),
+            "controls": dict(latest.get("controls") or {}, connected=commands.agent_listening),
         }
 
 
@@ -364,6 +369,7 @@ def _kv_set_locked(k, v):
 push = PushService(db, _lock, APNs(), lambda: status(), _kv_get_locked, _kv_set_locked)
 camera = Camera(Path(DB_PATH).parent)
 video = LiveVideo()
+commands = Commands()
 auth = Auth(db, _lock, reset=os.environ.get("RESET_LOGIN", "").strip().lower() in ("1", "true", "yes"))
 
 
@@ -594,6 +600,30 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(push.test_alert())
             if path.startswith("/api/camera/"):
                 return self._camera_route(method, path)
+            if method == "POST" and path == "/api/commands":
+                b = self._body()
+                kind = b.get("type")
+                if kind not in ALLOWED:
+                    return self._json({"ok": False, "error": "Unknown command"}, 400)
+                if not commands.agent_listening:
+                    return self._json({"ok": False, "error": "The PC app on the machine isn't connected."}, 503)
+                cmd = {"type": kind, "from": self._client_ip()}
+                for k in ("x", "y", "value", "on", "token"):
+                    if k in b:
+                        cmd[k] = b[k]
+                cid = commands.submit(cmd)
+                res = commands.wait_result(cid, timeout=8)
+                if res is None:
+                    return self._json({"ok": False, "error": "No answer from the PC app in time."}, 504)
+                return self._json({"ok": res["ok"], "message": res["message"],
+                                   "error": "" if res["ok"] else res["message"]})
+            if method == "GET" and path == "/api/agent/commands":
+                wait = max(0.0, min(30.0, float((qs.get("wait") or ["25"])[0])))
+                return self._json({"commands": commands.take(wait)})
+            if method == "POST" and path == "/api/agent/results":
+                b = self._body()
+                commands.put_result(str(b.get("id") or ""), bool(b.get("ok")), str(b.get("message") or ""))
+                return self._json({"ok": True})
             if method == "DELETE" and path == "/api/alarms":
                 if (qs.get("demo") or ["0"])[0].lower() in ("1", "true", "yes"):
                     return self._json(clear_demo())

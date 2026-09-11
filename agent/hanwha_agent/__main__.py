@@ -78,7 +78,10 @@ def main(argv=None):
         up.start()
         col.start()
         cam.start()
-        signal.signal(signal.SIGINT, lambda *_: (cam.stop(), col.stop(), up.stop(), sys.exit(0)))
+        from .commands import CommandClient
+        cmd = CommandClient(cfg, col, cam)
+        cmd.start()
+        signal.signal(signal.SIGINT, lambda *_: (cmd.stop(), cam.stop(), col.stop(), up.stop(), sys.exit(0)))
         while True:
             time.sleep(1)
 

@@ -43,8 +43,8 @@ struct RootView: View {
             AlarmsView()
                 .tabItem { Label("Alarms", systemImage: "exclamationmark.triangle") }
                 .badge(store.status?.activeAlarms.count ?? 0)
-            CameraView()
-                .tabItem { Label("Camera", systemImage: "video") }
+            ControlsView()
+                .tabItem { Label("Controls", systemImage: "slider.horizontal.3") }
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

@@ -149,6 +149,32 @@ struct APIClient {
         return URL(string: base + "/" + path.drop(while: { $0 == "/" }))
     }
 
+    struct CommandResult: Decodable {
+        var ok: Bool
+        var message: String?
+        var error: String?
+        var text: String { (ok ? message : (error ?? message)) ?? (ok ? "Done" : "Failed") }
+    }
+
+    /// Send a command to the machine's PC through the server (camera pan/tilt, Controls tab) and wait for its answer.
+    func command(_ body: [String: Any]) async throws -> CommandResult {
+        var req = try request("/api/commands", method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.timeoutInterval = 10
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await Self.session.data(for: req)
+        } catch {
+            throw APIError.unreachable((error as NSError).localizedDescription)
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 401 { throw APIError.unauthorized }
+        if let r = try? Self.decoder.decode(CommandResult.self, from: data) { return r }   // errors come back as JSON too
+        throw APIError.http(code)
+    }
+
     enum CameraFrame {
         case new(Data, etag: String?, frameTime: Double?)
         case unchanged

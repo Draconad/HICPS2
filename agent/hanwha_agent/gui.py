@@ -13,6 +13,7 @@ from tkinter import messagebox, ttk
 
 from .camera import CameraRelay
 from .collector import Collector
+from .commands import CommandClient
 from . import signals
 from .focas import FocasMachine, MockMachine, parse_signal
 from .config import VERSION, Config, data_dir, normalize_url, set_autostart
@@ -82,6 +83,7 @@ class App:
         self.collector: Collector | None = None
         self.uploader: Uploader | None = None
         self.camera: CameraRelay | None = None
+        self.commands: CommandClient | None = None
         self.log_q: queue.Queue = queue.Queue(maxsize=2000)
         h = QueueLogHandler(self.log_q)
         h.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s", "%H:%M:%S"))
@@ -89,7 +91,7 @@ class App:
 
         self.root = tk.Tk()
         self.root.title(f"Hanwha Monitor — {cfg.machine_name}")
-        self.root.geometry("620x800")
+        self.root.geometry("640x860")
         self.root.minsize(540, 640)
         self.root.configure(bg=BG)
         self._dark_title_bar()
@@ -330,7 +332,8 @@ class App:
             if hint:
                 ttk.Label(page, text=hint, style="Hint.TLabel").grid(row=r, column=1, sticky="w")
                 r += 1
-        for key, label in (("autostart", "Start automatically when Windows starts"),
+        for key, label in (("remote_control", "Allow remote changes from the app (required count, stop at count)"),
+                           ("autostart", "Start automatically when Windows starts"),
                            ("start_minimized", "Start minimised to the tray"),
                            ("demo_mode", "Demo mode (simulated machine — for testing the app)")):
             var = tk.BooleanVar(value=bool(getattr(self.cfg, key)))
@@ -382,6 +385,14 @@ class App:
         self.vars["camera_hd"] = var
         ttk.Checkbutton(page, text="HD stream (sharper, about 4x the data - SD is fine for a glance)",
                         variable=var).grid(row=r, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        r += 1
+        row = tk.Frame(page, bg=BG)
+        row.grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        for key, label in (("camera_audio", "Camera audio (starts muted in the app)"),
+                           ("camera_ptz", "Pan/tilt buttons")):
+            v = tk.BooleanVar(value=bool(getattr(self.cfg, key)))
+            self.vars[key] = v
+            ttk.Checkbutton(row, text=label, variable=v).pack(side="left", padx=(0, 18))
         r += 1
         var = tk.BooleanVar(value=self.cfg.camera_retime)
         self.vars["camera_retime"] = var
@@ -598,6 +609,8 @@ class App:
         self.uploader = Uploader(self.cfg.server_url, self.cfg.api_key, on_ack=self.collector.ack,
                                  on_response=lambda j: cam.set_live(j.get("camera_live")))
         self.camera.start()
+        self.commands = CommandClient(self.cfg, self.collector, self.camera)
+        self.commands.start()
         self.collector.listeners.append(self.uploader.submit)
         self.uploader.start()
         self.collector.start()
@@ -605,6 +618,8 @@ class App:
                  " (DEMO MODE)" if self.cfg.demo_mode else "")
 
     def stop_services(self):
+        if self.commands:
+            self.commands.stop()
         if self.camera:
             self.camera.stop()
         if self.uploader:

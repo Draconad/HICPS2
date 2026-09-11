@@ -164,6 +164,17 @@ The dashboard and the app restart the video by themselves if the picture ever fr
 
 The camera is behind the dashboard login and the API key, like everything else. Set `API_KEY` if the server is reachable from the internet.
 
+### Camera sound, pan/tilt and saved positions
+- **Sound:** the camera's microphone plays with the video, converted on the PC to a format phones and browsers can play. It starts muted; tap the speaker button to unmute. Untick **Camera audio** in the Camera tab to leave sound out.
+- **Pan/tilt:** use the arrows over the video, in the app or on the dashboard. Each tap nudges the camera a little. The picture is a few seconds behind, so moves show up late.
+- **Positions:** positions saved in the Tapo app (camera > pan/tilt > Preset) appear as buttons under the video. New ones show up within about 5 minutes.
+- Pan/tilt uses the camera's ONVIF service (port 2020) with the same Camera Account as the video. Commands go through the server to the PC app over a connection the PC keeps open, so they arrive in well under a second.
+
+### Controls tab (iPhone app)
+- **Required part count** and **Stop when count reached** can be changed from the phone. This only works if **Allow remote changes from the app** is ticked in the PC app's Settings on the machine, which is off by default, so it has to be switched on at the machine. Every change asks for confirmation and is logged on the PC.
+- The required count is written to FANUC system variable #3902. Stop-at-count writes the work counter signal found with the Signal finder. Only K (keep relay), D or # addresses are ever written; anything else is refused.
+- **Cycle start, cycle stop and continuous** are shown but not available yet. Starting or stopping a lathe remotely needs machine-specific signals and a safety interlock, so it can't start with someone at the machine. It will be designed together first.
+
 ### Work counter "stop at required count"
 Whether the machine stops at the required count is a Hanwha setting, not a standard FANUC one, so its address has to be found once:
 1. Open the **Signal finder** tab with the machine idle. Click **Take snapshot A**.

@@ -56,6 +56,23 @@
                 padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.65); color: #fff; }
   .cam .badge.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
                              background: var(--alarm); margin-right: 6px; vertical-align: 1px; }
+  .cam .tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; }
+  .cam .tool { width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff;
+               font-size: 16px; cursor: pointer; display: grid; place-items: center; }
+  .cam .tool:hover { background: rgba(0,0,0,.8); }
+  .ptz { position: absolute; right: 10px; bottom: 10px; display: grid; grid-template-columns: repeat(3, 34px);
+         grid-template-rows: repeat(3, 34px); gap: 2px; padding: 4px; border-radius: 50%; background: rgba(0,0,0,.5); }
+  .ptz button { border: 0; background: transparent; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
+                border-radius: 8px; }
+  .ptz button:hover { background: rgba(255,255,255,.15); }
+  .ptz button:disabled { opacity: .4; cursor: default; }
+  .ptz .dot { display: grid; place-items: center; color: rgba(255,255,255,.5); font-size: 8px; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  .presets .lbl { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .presets button { font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: #1f1f1f;
+                    border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .presets button:hover { border-color: var(--accent); }
+  .camerr { color: #ff9f0a; }
   .cam .wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
   .footrow { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
   .footrow a { color: var(--muted); }
@@ -90,7 +107,18 @@
       <img id="camimg" alt="Machine camera">
       <video id="camvid" muted autoplay playsinline hidden></video>
       <div class="badge" id="cambadge"></div>
+      <div class="tools">
+        <button class="tool" id="cammute" title="Unmute" hidden>&#128263;</button>
+        <button class="tool" id="camfull" title="Full screen">&#x26F6;</button>
+      </div>
+      <div class="ptz" id="ptz" hidden>
+        <span></span><button data-x="0" data-y="0.1" title="Tilt up">&#9650;</button><span></span>
+        <button data-x="-0.1" data-y="0" title="Pan left">&#9664;</button><span class="dot" id="ptzdot">&#9679;</span>
+        <button data-x="0.1" data-y="0" title="Pan right">&#9654;</button>
+        <span></span><button data-x="0" data-y="-0.1" title="Tilt down">&#9660;</button><span></span>
+      </div>
     </div>
+    <div class="presets" id="presets" hidden></div>
     <p class="sub" id="camnote">Live video runs a few seconds behind real time.</p>
   </div>
 
@@ -306,9 +334,58 @@ function camStop() {
   camDetach(); camBadge();
 }
 document.addEventListener("visibilitychange", () => document.hidden ? camStop() : camStart());
+// ---- sound, pan/tilt and saved positions (commands go through the server to the PC on the machine)
+async function sendCommand(body) {
+  const r = await fetch("api/commands" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify(body) });
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  return { ok: r.ok && j.ok, text: j.ok ? (j.message || "Done") : (j.error || j.message || `HTTP ${r.status}`) };
+}
+let ptzBusy = false;
+async function ptz(body) {
+  if (ptzBusy) return;
+  ptzBusy = true; $("ptzdot").style.color = "var(--accent)";
+  document.querySelectorAll("#ptz button, #presets button").forEach(b => b.disabled = true);
+  try {
+    const r = await sendCommand(body);
+    $("camnote").innerHTML = r.ok ? $("camnote").innerHTML : `<span class="camerr">${esc(r.text)}</span>`;
+  } catch (e) { $("camnote").innerHTML = `<span class="camerr">Couldn't reach the server</span>`; }
+  ptzBusy = false; $("ptzdot").style.color = "";
+  document.querySelectorAll("#ptz button, #presets button").forEach(b => b.disabled = false);
+}
+document.querySelectorAll("#ptz button").forEach(b =>
+  b.onclick = () => ptz({ type: "ptz", x: +b.dataset.x, y: +b.dataset.y }));
+$("cammute").onclick = () => {
+  vid.muted = !vid.muted;                 // the click itself lets the browser play sound
+  if (!vid.muted) vid.play().catch(() => {});
+  $("cammute").innerHTML = vid.muted ? "&#128263;" : "&#128266;";
+  $("cammute").title = vid.muted ? "Unmute" : "Mute";
+};
+$("camfull").onclick = () => {
+  const el = document.querySelector(".cam");
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (el.requestFullscreen) el.requestFullscreen();
+  else if (vid.webkitEnterFullscreen) vid.webkitEnterFullscreen();   // iPhone Safari
+};
+let presetKey = "";
+function camFeatures(c) {
+  $("cammute").hidden = c.audio === false;
+  $("ptz").hidden = !c.ptz;
+  const presets = (c.ptz && c.presets) || [];
+  const key = JSON.stringify(presets);
+  if (key !== presetKey) {
+    presetKey = key;
+    $("presets").innerHTML = presets.length ? '<span class="lbl">Positions</span>' +
+      presets.map(p => `<button data-token="${esc(p.token)}">${esc(p.name)}</button>`).join("") : "";
+    $("presets").querySelectorAll("button").forEach(b => b.onclick = () => ptz({ type: "ptz_preset", token: b.dataset.token }));
+  }
+  $("presets").hidden = !presets.length;
+}
+
 function camUpdate(c) {
   if (!c || !c.available) { $("camcard").hidden = true; return; }
   $("camcard").hidden = false;
+  camFeatures(c);
   camStart();
 }
 

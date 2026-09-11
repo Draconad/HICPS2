@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.backgroundInterval) private var backgroundInterval = 10.0
     @AppStorage(SettingsKey.keepAlive) private var keepAlive = true
     @AppStorage(SettingsKey.liveActivity) private var liveActivity = true
+    @AppStorage(SettingsKey.showCamera) private var showCamera = true
     @AppStorage(SettingsKey.notifyAlarms) private var notifyAlarms = true
     @AppStorage(SettingsKey.notifyStopped) private var notifyStopped = false
     @AppStorage(SettingsKey.notifyOff) private var notifyOff = false
@@ -143,6 +144,14 @@ struct SettingsView: View {
                     Text("Push (Apple)")
                 } footer: {
                     Text("The server sends alarm alerts and keeps the Live Activity current through Apple push, even when the app is closed. Needs the APNs key set up on the server (see README).")
+                }
+
+                Section {
+                    Toggle("Show the camera on the Status screen", isOn: $showCamera)
+                } header: {
+                    Text("Camera")
+                } footer: {
+                    Text("Live video streams only while the Status screen is open (about 0.3–0.6 Mbit/s). Sound starts muted.")
                 }
 
                 Section {

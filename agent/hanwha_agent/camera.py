@@ -157,9 +157,12 @@ class CameraRelay:
         headers = ["-headers", f"X-API-Key: {self.cfg.api_key}\r\n"] if self.cfg.api_key else []
         # camera timestamps that jump (some Tapo firmware) leave holes players stall on: use arrival time instead
         retime = ["-use_wallclock_as_timestamps", "1", "-fflags", "+genpts"] if self.cfg.camera_retime else []
+        # audio: the Tapo sends G.711 (A-law) which phones/browsers can't play in HLS - convert it to AAC (cheap)
+        audio = (["-map", "0:a:0?", "-c:a", "aac", "-b:a", "48k", "-ac", "1", "-ar", "16000",
+                  "-af", "aresample=async=1"] if self.cfg.camera_audio else ["-an"])
         return ([ff, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "8000000"] + retime +
                 ["-i", camera_url(self.cfg),
-                 "-map", "0:v:0", "-an"] + video +
+                 "-map", "0:v:0"] + video + audio +
                 ["-f", "hls", "-hls_time", str(HLS_SEGMENT), "-hls_list_size", "8",
                  "-hls_flags", "delete_segments+independent_segments",
                  "-method", "PUT", "-http_persistent", "1"] + headers + [push] +

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import re
 import threading
 import time
@@ -69,6 +70,8 @@ class Collector:
         self._bar_since: float | None = None
         self._bar_methods_failed: set[str] = set()
         self._work_counter: bool | None = None
+        self._jobs: queue.Queue = queue.Queue()
+        self.camera_presets: list[dict] = []          # the camera's saved positions (filled in by CommandClient)   # machine writes from the app, run on this thread between polls
         self._wc_error = ""
         self.listeners: list = []   # callables(snapshot)
 
@@ -102,7 +105,34 @@ class Collector:
                 except Exception:
                     log.exception("listener failed")
             interval = self.cfg.poll_interval if self.state.machine_connected else max(self.cfg.poll_interval, 5)
-            self._stop.wait(max(0.2, interval - (time.time() - started)))
+            # wait for the next poll, running any machine writes that come in meanwhile
+            while not self._stop.is_set():
+                left = interval - (time.time() - started)
+                if left <= 0:
+                    break
+                try:
+                    fn, done, box = self._jobs.get(timeout=min(left, 0.5))
+                except queue.Empty:
+                    continue
+                try:
+                    if not self.state.machine_connected:
+                        raise RuntimeError("The machine isn't connected.")
+                    box["result"] = fn(self.machine)
+                except Exception as e:  # noqa: BLE001 - reported back to the app
+                    box["error"] = e
+                finally:
+                    done.set()
+                break   # poll again straight away so the app sees the change
+
+    def run_on_machine(self, fn, timeout: float = 10):
+        """Run fn(machine) on the polling thread (FOCAS handles aren't thread-safe) and return its result."""
+        done, box = threading.Event(), {}
+        self._jobs.put((fn, done, box))
+        if not done.wait(timeout):
+            raise TimeoutError("The machine didn't respond in time.")
+        if "error" in box:
+            raise box["error"]
+        return box.get("result")
 
     def poll_once(self) -> dict:
         now = time.time()
@@ -346,6 +376,12 @@ class Collector:
             "sent_at": now,
             "demo": cfg.demo_mode,
             "machine_connected": self.state.machine_connected,
+            # what the app may offer (the PC decides - nothing is written unless "Allow remote changes" is ticked)
+            "controls": {"remote": bool(cfg.remote_control),
+                         "work_counter_signal": bool(parse_signal(cfg.work_counter_signal))},
+            "camera_features": {"ptz": bool(cfg.camera_enabled and cfg.camera_ptz),
+                                "audio": bool(cfg.camera_enabled and cfg.camera_audio),
+                                "presets": self.camera_presets if cfg.camera_enabled and cfg.camera_ptz else []},
         }
         if data is None:
             # Keep reporting the last known values but flag the machine as off / unreachable

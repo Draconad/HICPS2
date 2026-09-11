@@ -11,6 +11,7 @@ enum SettingsKey {
     static let notifyAlarms = "notifyAlarms"
     static let notifyStopped = "notifyStopped"
     static let notifyOff = "notifyOff"
+    static let showCamera = "showCameraOnStatus"
 }
 
 enum AppSettings {
@@ -27,6 +28,7 @@ enum AppSettings {
             SettingsKey.notifyAlarms: true,
             SettingsKey.notifyStopped: false,
             SettingsKey.notifyOff: false,
+            SettingsKey.showCamera: true,
         ])
     }
 
