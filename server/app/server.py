@@ -10,6 +10,7 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/states     state change log (?hours=24)
   PUT  /api/agent/update?version=X  (exe body, X-Signature header)   GET /api/agent/update   GET /api/agent/update/download
   GET  /api/barchanges   bar change history
+  GET  /api/programs   your program names       POST /api/programs {program: "O3110", name: "EMS301"}  (empty name = remove)
   GET  /api/bars   parts per bar per program + recent bars      DELETE /api/bars?program=O1234   forget a program's bars
   GET  /api/messages   operator message history (?limit=100) - e.g. "work count end in 1 hour", not alarms
   GET  /api/health
@@ -100,6 +101,8 @@ def _connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS bars (id INTEGER PRIMARY KEY AUTOINCREMENT, program TEXT NOT NULL, parts INTEGER NOT NULL,
             started_at REAL NOT NULL, ended_at REAL NOT NULL, demo INTEGER);
         CREATE INDEX IF NOT EXISTS bars_program ON bars(program, ended_at DESC);
+        -- your own names for programs ("EMS301"), shown after the number: O3110 - EMS301
+        CREATE TABLE IF NOT EXISTS programs (program TEXT PRIMARY KEY, name TEXT NOT NULL, updated REAL);
     """)
     cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
     if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
@@ -303,6 +306,28 @@ def program_key(prog: dict | None) -> str | None:
     return (prog.get("name") or "").strip() or None
 
 
+def program_name(key: str | None) -> str | None:
+    if not key:
+        return None
+    r = db.execute("SELECT name FROM programs WHERE program=?", (key,)).fetchone()
+    return r["name"] if r else None
+
+
+def program_label(key: str | None) -> str | None:
+    """"O3110 - EMS301" (or just "O3110" without a name)."""
+    name = program_name(key)
+    return f"{key} - {name}" if key and name else key
+
+
+def program_info() -> dict:
+    """The running program plus its key, your name for it and the combined label."""
+    prog = dict(latest.get("program") or {})
+    key = program_key(prog)
+    if key:
+        prog.update(key=key, custom_name=program_name(key), label=program_label(key))
+    return prog
+
+
 def _bar_count(snap: dict):
     """The counter a bar is measured with: the machine's total parts counter if there is one (operators reset the
     part counter, rarely the total), otherwise the part counter."""
@@ -342,7 +367,7 @@ def parts_per_bar(key: str | None, demo: bool) -> dict | None:
     med = sorted(vals)[len(vals) // 2]
     # leave out odd ones (a missed bar change counts double, a short remnant bar counts low)
     good = [v for v in vals if 0.6 * med <= v <= 1.4 * med][:BAR_HISTORY] or vals[:BAR_HISTORY]
-    return {"program": key, "avg": round(sum(good) / len(good), 1), "bars": len(good)}
+    return {"program": key, "label": program_label(key), "avg": round(sum(good) / len(good), 1), "bars": len(good)}
 
 
 def bar_forecast(now: float) -> dict | None:
@@ -350,7 +375,7 @@ def bar_forecast(now: float) -> dict | None:
     key = program_key(latest.get("program"))
     pb = parts_per_bar(key, bool(latest.get("demo")))
     if not pb:
-        return {"program": key, "avg": None} if key else None
+        return {"program": key, "label": program_label(key), "avg": None} if key else None
     avg = pb["avg"]
     start = meta.get("bar_start") or {}
     kind, n = _bar_count(latest)
@@ -493,7 +518,7 @@ def status() -> dict:
                                                         and now - (meta.get("at_req_since") or now) > 8))),
             "agent_version": latest.get("agent_version"),
             "agent_update": update_info().get("version"),
-            "program": latest.get("program") or {},
+            "program": program_info(),
             "paths": latest.get("paths") or [],
             "active_alarms": active if state != "off" else [],
             "messages": message_rows(True, 10) if state != "off" else [],
@@ -764,12 +789,37 @@ class Handler(BaseHTTPRequestHandler):
                 with _lock:
                     rows = db.execute("SELECT * FROM bar_changes ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
                 return self._json({"bar_changes": [dict(r) for r in rows]})
+            if method == "GET" and path == "/api/programs":
+                with _lock:
+                    rows = db.execute("SELECT p.program, p.name, p.updated, (SELECT COUNT(*) FROM bars b WHERE "
+                                      "b.program=p.program) bars FROM programs p ORDER BY p.program").fetchall()
+                return self._json({"programs": [dict(r) for r in rows]})
+            if method in ("POST", "PUT") and path == "/api/programs":
+                # name a program: {"program": "O3110", "name": "EMS301"} - an empty name removes it
+                b = self._body()
+                key = str(b.get("program") or "").strip().upper()
+                if re.fullmatch(r"\d{1,5}", key):
+                    key = f"O{int(key):04d}"
+                name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()[:40]
+                if not re.fullmatch(r"O\d{4,5}|[A-Z0-9_.\-]{1,32}", key):
+                    return self._json({"ok": False, "error": "program must look like O3110"}, 400)
+                with _lock:
+                    if name:
+                        db.execute("INSERT INTO programs(program,name,updated) VALUES(?,?,?) ON CONFLICT(program) "
+                                   "DO UPDATE SET name=excluded.name, updated=excluded.updated", (key, name, time.time()))
+                    else:
+                        db.execute("DELETE FROM programs WHERE program=?", (key,))
+                    label = program_label(key)
+                log.info("Program %s named %r", key, name)
+                push.poke()
+                return self._json({"ok": True, "program": key, "name": name or None, "label": label})
             if method == "GET" and path == "/api/bars":
                 # parts per bar, per program (what the forecast is based on), plus the recent bars
                 with _lock:
                     progs = db.execute("SELECT program, COUNT(*) n, MAX(ended_at) last FROM bars WHERE COALESCE(demo,0)=0 "
                                        "GROUP BY program ORDER BY last DESC").fetchall()
-                    out = [{**(parts_per_bar(r["program"], False) or {}), "recorded": r["n"], "last_at": r["last"]}
+                    out = [{**(parts_per_bar(r["program"], False) or {}), "program": r["program"],
+                            "label": program_label(r["program"]), "recorded": r["n"], "last_at": r["last"]}
                            for r in progs]
                     recent = [dict(r) for r in db.execute("SELECT * FROM bars ORDER BY ended_at DESC LIMIT 100")]
                 return self._json({"programs": out, "bars": recent})

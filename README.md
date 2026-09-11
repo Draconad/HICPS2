@@ -154,6 +154,9 @@ Every bar change is timed. The dashboard and the app's Status screen show today'
 Each bar is counted from the start of one bar change to the start of the next, using the machine's total parts counter, so resetting the part counter doesn't spoil it. The count is stored against the main program number. When a program that has run before is loaded, the Bar changes card shows its parts per bar straight away, averaged over its last 10 bars. Odd bars, such as a short remnant or a missed bar change, are left out of the average. It also shows how many more bars the job needs to reach the required count, e.g. "O1234: ~3 more bars needed (+ ~18 on this one)". A new program shows "learning" until its first full bar.
 The data is at `/api/bars`. To make a program start learning again, e.g. after changing the bar length, delete its bars with `DELETE /api/bars?program=O1234`.
 
+### Program names
+Click **Name** on the Program card on the dashboard, or tap **Name** on it in the app, to give the running program your own name. It then shows as **O3110 - EMS301** on the dashboard, the app, the Live Activity and the parts-per-bar lines. The name is stored on the server against the program number, alongside its bar counts, so it comes back whenever that program is loaded. Clear the name to remove it. The list is at `/api/programs`.
+
 ### Dashboard on different screen sizes
 On a wide screen, the camera sits beside the status and figures, with the alarms full width underneath. On a narrower window or a phone, everything stacks in one column.
 

@@ -93,7 +93,7 @@ class PushService:
     @staticmethod
     def content_from(s: dict) -> dict:
         prog = s.get("program") or {}
-        title = prog.get("name") or (f"O{prog['number']:04d}" if prog.get("number") else "")
+        title = prog.get("label") or prog.get("name") or (f"O{prog['number']:04d}" if prog.get("number") else "")
         c = {
             "state": s["state"],
             "detail": s.get("state_detail") or "",

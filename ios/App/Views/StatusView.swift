@@ -337,7 +337,7 @@ struct BarChangeCard: View {
 
     /// "~3 more bars needed", "Finishes on this bar", or "Learning parts per bar…"
     private func barsNeeded(_ pb: MachineStatus.PerBar) -> String? {
-        let prog = pb.program ?? "This program"
+        let prog = pb.label ?? pb.program ?? "This program"
         guard let avg = pb.avg else { return "\(prog): learning parts per bar – shown after its first full bar" }
         if pb.partsLeft != nil {
             if pb.moreBars == 0 { return "\(prog): finishes on this bar" }
@@ -410,19 +410,41 @@ struct CycleCard: View {
 
 struct ProgramCard: View {
     let s: MachineStatus
+    @EnvironmentObject var store: MachineStore
+    @State private var naming = false
+    @State private var newName = ""
+    @State private var saveError: String?
 
     var body: some View {
         Card(title: "Program") {
             HStack(alignment: .firstTextBaseline) {
                 Text(s.program?.title ?? "—")
                     .font(.title2.weight(.bold).monospaced())
-                if let c = s.program?.comment, !c.isEmpty {
-                    Text(c)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Spacer()
+                if let key = s.program?.key {
+                    Button {
+                        newName = s.program?.customName ?? ""
+                        naming = true
+                    } label: {
+                        Label(s.program?.customName == nil ? "Name" : "Rename", systemImage: "pencil")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Name program \(key)")
+                }
+            }
+            if let c = s.program?.comment, !c.isEmpty {
+                Text(c)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let err = saveError {
+                Text(err).font(.caption).foregroundStyle(.red)
             }
             if let paths = s.paths, !paths.isEmpty {
                 HStack(spacing: 8) {
@@ -438,6 +460,31 @@ struct ProgramCard: View {
                 Text("Total parts counter: \(total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+        .alert("Name \(s.program?.key ?? "program")", isPresented: $naming) {
+            TextField("e.g. EMS301", text: $newName)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+            Button("Save") { save(newName) }
+            if s.program?.customName != nil {
+                Button("Remove name", role: .destructive) { save("") }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Shown after the number, e.g. \(s.program?.key ?? "O3110") - EMS301. Kept with this program's parts-per-bar figures.")
+        }
+    }
+
+    private func save(_ name: String) {
+        guard let key = s.program?.key else { return }
+        Task {
+            do {
+                try await APIClient.current.nameProgram(key, name: name.trimmingCharacters(in: .whitespaces))
+                saveError = nil
+                await store.refresh()
+            } catch {
+                saveError = "Couldn't save the name: \(error.localizedDescription)"
             }
         }
     }

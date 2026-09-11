@@ -61,6 +61,10 @@
   .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
   @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
+  .labrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .namebtn { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: none; color: var(--muted);
+             background: #1f1f1f; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+  .namebtn:hover { color: var(--ink); border-color: var(--accent); }
   .pair { display: flex; gap: 22px; flex-wrap: wrap; }
   .pair .sub { margin-top: -2px; }
   #bcsub { margin-top: 6px; }
@@ -163,7 +167,8 @@
   <div class="grid">
     <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
     <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
-    <div class="card"><div class="label">Program</div><div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
+    <div class="card"><div class="label labrow">Program <button class="namebtn" id="progname" hidden title="Give this program your own name">&#9998; Name</button></div>
+      <div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
     <div class="card" id="bccard" hidden><div class="label">Bar changes</div>
       <div class="pair"><div><div class="value" id="bctoday">—</div><div class="sub">today</div></div>
         <div id="ppbwrap"><div class="value" id="ppb">—</div><div class="sub">parts / bar</div></div></div>
@@ -285,7 +290,10 @@ async function status() {
   $("cycle").textContent = dur(s.last_cycle_s);
   $("cur").textContent = s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "";
   const p = s.program || {};
-  $("prog").textContent = p.name || (p.number ? "O" + p.number : "—");
+  $("prog").textContent = p.label || p.name || (p.number ? "O" + p.number : "—");
+  progNow = p;
+  $("progname").hidden = !p.key;
+  $("progname").innerHTML = p.custom_name ? "&#9998; Rename" : "&#9998; Name";
   $("comment").textContent = p.comment || "";
   $("active").innerHTML = s.active_alarms.length ? s.active_alarms.map(a =>
     `<tr><td class="code active">${esc(a.code)}</td><td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${t(a.started_at)}</td></tr>`).join("")
@@ -299,15 +307,15 @@ async function status() {
   $("bctoday").textContent = bc.today || 0;
   // parts per bar: learnt per program, so it's known as soon as a program that has run before is loaded
   $("ppb").textContent = pb && pb.avg ? "~" + Math.round(pb.avg) : "—";
-  $("ppbwrap").title = pb && pb.avg ? `${pb.program}: average of the last ${pb.bars} bar${pb.bars === 1 ? "" : "s"}` : "";
+  $("ppbwrap").title = pb && pb.avg ? `${pb.label || pb.program}: average of the last ${pb.bars} bar${pb.bars === 1 ? "" : "s"}` : "";
   let need = "";
-  if (pb && !pb.avg) need = `<span class="muted">${esc(pb.program)}: learning parts per bar - shown after its first full bar</span>`;
+  if (pb && !pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)}: learning parts per bar - shown after its first full bar</span>`;
   else if (pb && pb.parts_left) {
-    if (pb.more_bars === 0) need = `${esc(pb.program)}: finishes on this bar (~${pb.left_on_bar} parts left on it)`;
-    else if (pb.more_bars != null) need = `${esc(pb.program)}: ~${pb.more_bars} more bar${pb.more_bars === 1 ? "" : "s"} needed`
+    if (pb.more_bars === 0) need = `${esc(pb.label || pb.program)}: finishes on this bar (~${pb.left_on_bar} parts left on it)`;
+    else if (pb.more_bars != null) need = `${esc(pb.label || pb.program)}: ~${pb.more_bars} more bar${pb.more_bars === 1 ? "" : "s"} needed`
                                          + (pb.left_on_bar > 0 ? ` <span class="muted">(+ ~${pb.left_on_bar} parts left on this one)</span>` : "");
-    else if (pb.bars_total != null) need = `${esc(pb.program)}: ~${pb.bars_total} bar${pb.bars_total === 1 ? "" : "s"} for the ${pb.parts_left} parts left`;
-  } else if (pb && pb.avg) need = `<span class="muted">${esc(pb.program)} &middot; average of ${pb.bars} bar${pb.bars === 1 ? "" : "s"}</span>`;
+    else if (pb.bars_total != null) need = `${esc(pb.label || pb.program)}: ~${pb.bars_total} bar${pb.bars_total === 1 ? "" : "s"} for the ${pb.parts_left} parts left`;
+  } else if (pb && pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)} &middot; average of ${pb.bars} bar${pb.bars === 1 ? "" : "s"}</span>`;
   $("bcneed").innerHTML = need;
   $("bcsub").innerHTML = [bc.avg_today_s || bc.avg_week_s ? `Average ${span(bc.avg_today_s || bc.avg_week_s)}` : "",
     bc.last_s ? `Last ${span(bc.last_s)}${bc.last_at ? " at " + new Date(bc.last_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}` : "",
@@ -318,6 +326,19 @@ async function status() {
   $("foot").textContent = (s.agent_version ? `PC app v${s.agent_version}` : "")
     + (s.agent_update && s.agent_version && cmp(s.agent_update, s.agent_version) > 0 ? ` · v${s.agent_update} waiting to install` : "");
 }
+// your own name for the running program: shown after the number (O3110 - EMS301), kept with its bar data
+let progNow = {};
+$("progname").onclick = async () => {
+  const p = progNow;
+  if (!p.key) return;
+  const name = prompt(`Name for ${p.key} (shown as "${p.key} - name"). Leave empty to remove it.`, p.custom_name || "");
+  if (name === null) return;
+  const r = await fetch("api/programs" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ program: p.key, name }) });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) alert("Couldn't save the name: " + (j.error || "HTTP " + r.status));
+  status();
+};
 async function history() {
   const r = await getJSON("api/alarms" + (q ? q + "&" : "?") + "limit=200");
   const btn = $("cleardemo");

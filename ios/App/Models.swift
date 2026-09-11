@@ -5,8 +5,12 @@ struct ProgramInfo: Decodable, Equatable {
     var number: Int?
     var name: String?
     var comment: String?
+    var key: String?            // "O3110" - what names and bar counts are stored against
+    var customName: String?     // your own name for it ("EMS301"), set in the app or on the dashboard
+    var label: String?          // "O3110 - EMS301"
 
     var title: String {
+        if let label, !label.isEmpty { return label }
         if let name, !name.isEmpty { return name }
         if let number { return String(format: "O%04d", number) }
         return "—"
@@ -102,6 +106,7 @@ struct MachineStatus: Decodable, Equatable {
     /// Parts per bar, learnt per program (so it's known as soon as a program that has run before is loaded)
     struct PerBar: Decodable, Equatable {
         var program: String?
+        var label: String?         // "O3110 - EMS301"
         var avg: Double?           // nil = still learning this program
         var bars: Int?             // how many bars the average is over
         var intoBar: Int?          // parts made on the current bar so far

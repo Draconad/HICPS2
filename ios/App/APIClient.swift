@@ -204,6 +204,13 @@ struct APIClient {
         }
     }
 
+    /// Your own name for a program (empty removes it). Stored on the server with the program's bar counts.
+    func nameProgram(_ key: String, name: String) async throws {
+        struct R: Decodable { var ok: Bool; var error: String? }
+        let r = try await post("/api/programs", ["program": key, "name": name], as: R.self)
+        if !r.ok { throw NSError(domain: "HiCPS", code: 1, userInfo: [NSLocalizedDescriptionKey: r.error ?? "Not saved"]) }
+    }
+
     func clearHistory() async throws {
         struct OK: Decodable { var ok: Bool }
         _ = try await send(try request("/api/alarms", method: "DELETE"), as: OK.self)
