@@ -246,8 +246,10 @@ function camWatchdog() {
     camAttach(camInfo.url);
   }
 }
-function refreshStill() {
-  if (!camPlaying) still.src = "api/camera/frame.jpg" + (q ? q + "&" : "?") + "t=" + Date.now();
+function refreshStill() {   // kept fresh even while playing: it's what shows if the video has to restart
+  const img = new Image();
+  img.onload = () => { still.src = img.src; };
+  img.src = "api/camera/frame.jpg" + (q ? q + "&" : "?") + "t=" + Date.now();
 }
 still.onload = () => { $("camwait").hidden = true; };
 let camInfo = null;

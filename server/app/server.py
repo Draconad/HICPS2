@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover
     from .camera import MAX_FRAME, Camera, LiveVideo
     from .push import PushService
 
-VERSION = "1.6.2"
+VERSION = "1.6.3"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -442,6 +442,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _raw_body(self, limit: int) -> bytes:
         """Request body, including chunked transfer encoding (ffmpeg's HTTP PUT uses it)."""
+        self._drained = True
         if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
             out = bytearray()
             while True:
@@ -460,6 +461,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length > 0 else b""
 
     def _body(self) -> dict:
+        self._drained = True
         length = int(self.headers.get("Content-Length") or 0)
         if not 0 < length < 100_000:
             return {}
@@ -529,6 +531,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _route(self, method: str):
+        self._drained = False   # handler objects are reused for every request on a kept-open connection
         url = urlparse(self.path)
         qs = parse_qs(url.query)
         path = url.path.rstrip("/") or "/"
@@ -568,6 +571,7 @@ class Handler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length") or 0)
                 if length <= 0 or length > 1_000_000:
                     return self._json({"detail": "bad body"}, 400)
+                self._drained = True
                 snap = json.loads(self.rfile.read(length))
                 if not isinstance(snap, dict):
                     return self._json({"detail": "expected object"}, 400)
@@ -576,6 +580,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = {}
                 if method == "POST":
                     length = int(self.headers.get("Content-Length") or 0)
+                    self._drained = True
                     body = json.loads(self.rfile.read(length)) if 0 < length < 100_000 else {}
                 if method == "GET" and path == "/api/push/status":
                     return self._json(push.info())
@@ -606,6 +611,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 < length <= MAX_FRAME:
                 return self._json({"detail": "bad frame"}, 400)
+            self._drained = True
             jpg = self.rfile.read(length)
             if not jpg.startswith(b"\xff\xd8"):
                 return self._json({"detail": "not a JPEG"}, 400)
@@ -645,6 +651,9 @@ class Handler(BaseHTTPRequestHandler):
                 video.put(parts[5], parts[6], self._raw_body(8_000_000))
                 return self._json({"ok": True, "live": camera.watched})
             if method == "DELETE":
+                # ffmpeg sends its DELETEs with an (empty) chunked body: it must be read, or the leftover bytes
+                # corrupt the next upload on this kept-open connection and the live video stalls
+                self._raw_body(1_000_000)
                 return self._json({"ok": True})
         return self._json({"detail": "not found"}, 404)
 
@@ -691,12 +700,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._route("POST")
+        self._drain()
 
     def do_PUT(self):
         self._route("PUT")
+        self._drain()
 
     def do_DELETE(self):
         self._route("DELETE")
+        self._drain()
+
+    def _drain(self):
+        """Discard any request body a handler didn't read, so a kept-open connection stays in sync."""
+        if getattr(self, "_drained", False):
+            return
+        try:
+            if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower() or \
+                    int(self.headers.get("Content-Length") or 0) > 0:
+                self.close_connection = True   # can't tell safely how much is left - start a fresh connection
+        except ValueError:
+            self.close_connection = True
 
     def do_OPTIONS(self):
         self.send_response(HTTPStatus.NO_CONTENT)
