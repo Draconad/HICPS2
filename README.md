@@ -130,6 +130,7 @@ Every push to GitHub builds, signs and uploads the app to **TestFlight**. Your i
 You only do this setup once.
 
 **A. Apple Developer website** (developer.apple.com → Account)
+0. **Devices → +**: register your iPhone and iPad by their UDID. To find a UDID, plug the device into the PC and look under Device info in iMazing or 3uTools. The build's signing step needs at least one registered device.
 1. **Identifiers → +**, App IDs → App. Register:
    - Description `HiCPS-2`, Bundle ID (explicit) **`com.jtquayle.hicps2`**. Tick **Push Notifications** and **Time Sensitive Notifications**.
    - A second App ID: `HiCPS-2 Widget`, **`com.jtquayle.hicps2.widget`**, with no capabilities.

@@ -112,6 +112,11 @@ struct APIClient {
         _ = try await post("/api/push/unregister", ["activity_id": activityID], as: R.self)
     }
 
+    func pushUnregister(token: String) async throws {
+        struct R: Decodable { var ok: Bool }
+        _ = try await post("/api/push/unregister", ["token": token], as: R.self)
+    }
+
     func pushStatus() async throws -> PushStatus {
         try await send(try request("/api/push/status"), as: PushStatus.self)
     }

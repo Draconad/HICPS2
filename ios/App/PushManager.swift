@@ -61,7 +61,21 @@ final class PushManager: ObservableObject {
             c = c.filter { !$0.key.hasPrefix("la_start|") || $0.value == token }
         }
         cache = c
+        // With the Live Activity switched off in Settings, don't let the server start one.
+        if kind == "la_start" && !AppSettings.liveActivity { return }
         Task { await send(kind: kind, token: token, activityID: activityID) }
+    }
+
+    /// Live Activity switch in Settings: off stops the server from starting new ones by push.
+    func liveActivitySettingChanged(enabled: Bool) {
+        let starts = cache.filter { $0.key.hasPrefix("la_start|") }.map(\.value)
+        for token in starts {
+            if enabled {
+                Task { await send(kind: "la_start", token: token, activityID: nil) }
+            } else {
+                Task { try? await APIClient.current.pushUnregister(token: token) }
+            }
+        }
     }
 
     func unregister(activityID: String) {
@@ -78,6 +92,7 @@ final class PushManager: ObservableObject {
             let parts = key.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             let kind = parts.first ?? ""
             let activity = parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil
+            if kind == "la_start" && !AppSettings.liveActivity { continue }
             if kind == "la", let activity, !LiveActivityManager.isRunning(id: activity) {
                 var c = cache; c.removeValue(forKey: key); cache = c
                 continue
@@ -105,6 +120,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         application.registerForRemoteNotifications()
+        // Start watching for push-started activities / push-to-start tokens even on a background launch
+        // (no UI), when the SwiftUI views that normally create the manager may never be built.
+        Task { @MainActor in _ = LiveActivityManager.shared }
         return true
     }
 

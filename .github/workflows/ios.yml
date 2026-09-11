@@ -21,7 +21,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     env:
-      HAS_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
+      HAS_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 

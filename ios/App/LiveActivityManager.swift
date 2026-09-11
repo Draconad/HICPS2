@@ -38,6 +38,10 @@ final class LiveActivityManager: ObservableObject {
                 guard let self else { return }
                 if self.activity?.id != a.id {
                     EventLog.shared.add("LA appeared (started by push?) \(a.id.prefix(8))")
+                    if let old = self.activity {   // the server replaced it (8-hour rollover) - end the old card
+                        PushManager.shared.unregister(activityID: old.id)
+                        Task { await old.end(nil, dismissalPolicy: .immediate) }
+                    }
                     self.adopt(a, startedAt: Date())
                 }
             }
@@ -178,7 +182,10 @@ final class LiveActivityManager: ObservableObject {
     private func staleDate() -> Date {
         // If nothing new arrives in this time, the widget greys itself out ("No update since …").
         // Generous, so a brief Wi-Fi blip or a slow poll doesn't grey the card out.
-        Date().addingTimeInterval(max(180, AppSettings.backgroundInterval * 12))
+        // With server push, the server's heartbeat (every 10 min, stale-date +15 min) keeps it fresh after the app
+        // is suspended, so a local 3-minute stale date would grey the card out between heartbeats.
+        Date().addingTimeInterval(max(PushManager.shared.serverHandlesPush ? 15 * 60 : 180,
+                                      AppSettings.backgroundInterval * 12))
     }
 
     /// Called after every poll.

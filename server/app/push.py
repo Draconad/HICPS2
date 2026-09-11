@@ -222,6 +222,7 @@ class PushService:
                 "timestamp": int(now), "event": "start", "content-state": content,
                 "attributes-type": "MachineActivityAttributes", "attributes": {"machineName": machine},
                 "stale-date": int(now + STALE_AFTER),
+                "input-push-token": 1,   # iOS 18+: ask for an update token for the new activity
                 "alert": {"title": machine, "body": f"{s['state'].capitalize()} · {content.get('parts', '—')}"
                           + (f"/{content['required']}" if content.get("required") else "")},
             }}

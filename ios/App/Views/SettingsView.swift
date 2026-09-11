@@ -59,6 +59,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("Show on Lock Screen & Dynamic Island", isOn: $liveActivity)
                         .onChange(of: liveActivity) { on in
+                            push.liveActivitySettingChanged(enabled: on)
                             Task {
                                 if on { live.start(with: store.status, machineName: store.machineName) }
                                 else { await live.stop() }
