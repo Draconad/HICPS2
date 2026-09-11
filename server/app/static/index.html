@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hanwha Monitor</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --ink: #1d2127; --muted: #6b7280; --line: #e6e8ec;
+    --run: #2fb344; --stby: #e0a800; --alarm: #e5383b; --off: #8a8f98; --accent: #2f6fed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1114; --card: #1a1d22; --ink: #eef0f3; --muted: #9aa1ab; --line: #2a2e35; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 880px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .pill { color: #fff; font-weight: 700; letter-spacing: .04em; padding: 8px 18px; border-radius: 999px; background: var(--off); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .label { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  h2 { font-size: 15px; margin: 24px 0 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
+  th { color: var(--muted); font-size: 12px; font-weight: 600; }
+  .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
+  .active { color: var(--alarm); font-weight: 700; }
+  .wrap { overflow-x: auto; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 id="name">Hanwha Monitor</h1>
+      <div class="sub" id="detail">Loading…</div>
+    </div>
+    <div class="pill" id="pill">—</div>
+  </header>
+
+  <div class="grid">
+    <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
+    <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
+    <div class="card"><div class="label">Program</div><div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
+  </div>
+
+  <h2>Active alarms</h2>
+  <div class="card wrap"><table><tbody id="active"><tr><td class="muted">None</td></tr></tbody></table></div>
+
+  <h2>Alarm history</h2>
+  <div class="card wrap"><table>
+    <thead><tr><th>Time</th><th>Code</th><th>Message</th><th>Path</th><th>Duration</th></tr></thead>
+    <tbody id="history"></tbody>
+  </table></div>
+  <p class="sub" id="foot"></p>
+</main>
+<script>
+const key = new URLSearchParams(location.search).get("key");
+const q = key ? `?key=${encodeURIComponent(key)}` : "";
+const colors = { running: "var(--run)", standby: "var(--stby)", alarm: "var(--alarm)", off: "var(--off)" };
+const dur = s => { if (s == null) return "—"; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}` : `${m}:${String(x).padStart(2,"0")}`; };
+const t = ts => new Date(ts * 1000).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const $ = id => document.getElementById(id);
+
+async function status() {
+  const s = await (await fetch("api/status" + q)).json();
+  $("name").textContent = s.machine_name + (s.demo ? " (demo)" : "");
+  $("detail").textContent = s.state_detail || "";
+  $("pill").textContent = s.state.toUpperCase();
+  $("pill").style.background = colors[s.state] || "var(--off)";
+  $("parts").textContent = s.parts == null ? "—" : (s.parts_required ? `${s.parts} / ${s.parts_required}` : s.parts);
+  $("bar").style.width = (s.parts_required ? Math.min(100, 100 * s.parts / s.parts_required) : 0) + "%";
+  $("eta").textContent = s.eta_s ? `Done in ~${dur(s.eta_s)}` : "";
+  $("cycle").textContent = dur(s.last_cycle_s);
+  $("cur").textContent = s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "";
+  const p = s.program || {};
+  $("prog").textContent = p.name || (p.number ? "O" + p.number : "—");
+  $("comment").textContent = p.comment || "";
+  $("active").innerHTML = s.active_alarms.length ? s.active_alarms.map(a =>
+    `<tr><td class="code active">${esc(a.code)}</td><td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${t(a.started_at)}</td></tr>`).join("")
+    : `<tr><td class="muted">None</td></tr>`;
+  $("foot").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
+}
+async function history() {
+  const r = await (await fetch("api/alarms" + (q ? q + "&" : "?") + "limit=200")).json();
+  $("history").innerHTML = r.alarms.map(a => `<tr><td>${t(a.started_at)}</td><td class="code ${a.active ? "active" : ""}">${esc(a.code)}</td>
+    <td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${a.active ? '<span class="active">Active</span>' : dur(a.duration_s)}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">No alarms recorded yet</td></tr>`;
+}
+const tick = () => status().catch(e => $("detail").textContent = "Can't reach server: " + e);
+tick(); history(); setInterval(tick, 2000); setInterval(history, 15000);
+</script>
+</body>
+</html>

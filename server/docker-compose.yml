@@ -1,0 +1,15 @@
+services:
+  hanwha-monitor:
+    build: .
+    # or, if you use the GitHub-built image instead of building on Unraid:
+    # image: ghcr.io/<your-github-username>/hanwha-monitor-server:latest
+    container_name: hanwha-monitor
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    environment:
+      - TZ=Europe/London
+      - AGENT_TIMEOUT=30        # seconds without data from the PC before the machine shows OFF
+      # - API_KEY=change-me     # optional shared key (set the same key in the PC app and iPhone app)
+    volumes:
+      - /mnt/user/appdata/hanwha-monitor/data:/data

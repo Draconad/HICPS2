@@ -1,0 +1,82 @@
+name: iOS app (unsigned IPA for Sideloadly)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+
+jobs:
+  build:
+    # macos-26 = Xcode 26 / iOS 26 SDK (same runner the RED-TOK app builds on).
+    # SWIFT_VERSION stays 5.0 in project.yml so Xcode 26 doesn't switch to Swift 6 strict concurrency.
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build (no code signing - Sideloadly signs it)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project HanwhaMonitor.xcodeproj \
+            -scheme HanwhaMonitor \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee build.log
+
+      # Full log as a downloadable file, pass or fail.
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build.log
+          retention-days: 30
+
+      # An extension with no CFBundleVersion builds fine and is then refused by the phone at install.
+      - name: Check every bundle declares a version
+        working-directory: ios
+        run: |
+          app="build/Build/Products/Release-iphoneos/HanwhaMonitor.app"
+          status=0
+          for bundle in "$app" "$app"/PlugIns/*.appex; do
+            plist="$bundle/Info.plist"
+            [ -f "$plist" ] || { echo "::error::missing $plist"; status=1; continue; }
+            for key in CFBundleVersion CFBundleShortVersionString CFBundleIdentifier; do
+              value="$(plutil -extract "$key" raw -o - "$plist" 2>/dev/null || true)"
+              if [ -z "$value" ]; then echo "::error::$(basename "$bundle") has no $key"; status=1
+              else echo "$(basename "$bundle") $key = $value"; fi
+            done
+          done
+          ls "$app/PlugIns" || { echo "::error::Live Activity extension missing"; status=1; }
+          exit $status
+
+      - name: Package IPA
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/HanwhaMonitor.app Payload/
+          zip -qry HanwhaMonitor.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HanwhaMonitor-ipa
+          path: ios/HanwhaMonitor.ipa
+          retention-days: 30

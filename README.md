@@ -1,0 +1,175 @@
+# Hanwha XE35 Monitor
+
+Remote status and alarm monitoring for the Hanwha XE35 (FANUC 0i-F), as a replacement for the broken HiCPS app link.
+
+```
+ XE35 (FANUC 0i-F)  ──FOCAS──►  Windows PC: HanwhaMonitor.exe  ──HTTP──►  Unraid: hanwha-monitor container  ◄──HTTP──  iPhone app
+ 192.168.11.11:8193             (agent: reads status/alarms)             (stores history, port 8420)                (Status / Alarms / Live Activity)
+```
+
+| Folder | What it is |
+|---|---|
+| `agent/`  | Windows desktop app. Has a status window, settings, a log and a tray icon, and starts with Windows. |
+| `server/` | Docker container for Unraid. Pure Python, no dependencies, with SQLite alarm history and a web dashboard on `:8420`. |
+| `ios/`    | SwiftUI iPhone app with a Live Activity and the Dynamic Island. It's built in the cloud and sideloaded with Sideloadly. |
+| `.github/workflows/` | Free cloud builds for the `.ipa` (on a Mac), the `.exe` (on Windows) and the Docker image. |
+
+---
+
+## 1. Push to GitHub and get the builds (double-click)
+
+GitHub builds everything in the cloud, including the iPhone app (no Mac needed). The repository is **Draconad/HICPS2**, set in `github-repo.txt`.
+
+1. **First time on a PC:** double-click **`github-auth.bat`**. It installs Git and GitHub CLI if they're missing, then signs you in through the browser with a one-time code. You only do this once per PC. If it installs something, close the window and run it again.
+2. Double-click **`push-to-github.bat`**. It:
+   - commits whatever changed in this folder and pushes it to GitHub;
+   - waits for the cloud builds of that exact commit, showing live progress;
+   - downloads the results into **`build-out\`**, e.g. `HanwhaMonitor-b1.ipa` (the iPhone app) and `HanwhaMonitor-1.0.0.exe` (the Windows app).
+3. If a build fails, its error log is saved in `build-out\` instead. Send me that file.
+
+Details:
+- Each build only runs when its own folder changed (`ios/`, `agent/`, `server/`). When a part wasn't rebuilt, the script downloads its last good build, so `build-out\` always has both files.
+- If the push worked but the download didn't, run `wait-for-builds.ps1` on its own (right-click → Run with PowerShell). It doesn't push again.
+- The push is a force push: this folder is treated as the master copy, and it overwrites anything edited directly on GitHub.
+- The FANUC DLLs are never uploaded (`.gitignore` excludes `*.dll`).
+- The server image is published to `ghcr.io/draconad/hanwha-monitor-server:latest`.
+
+> Private repos get 2,000 free Action minutes a month. Mac minutes count ×10, so that's roughly 25 iPhone builds a month.
+
+---
+
+## 2. Server on Unraid
+
+**Option A: build it on Unraid (no GitHub needed)**
+
+Copy the `server` folder to `/mnt/user/appdata/hanwha-monitor/src`, then in the Unraid terminal:
+
+```bash
+cd /mnt/user/appdata/hanwha-monitor/src
+docker build -t hanwha-monitor-server .
+docker run -d --name hanwha-monitor --restart unless-stopped \
+  -p 8420:8420 -e TZ=Europe/London \
+  -v /mnt/user/appdata/hanwha-monitor/data:/data \
+  hanwha-monitor-server
+```
+
+With the Compose Manager plugin you can instead use `server/docker-compose.yml`. Change `build: .` to `build: /mnt/user/appdata/hanwha-monitor/src`.
+
+**Option B: use the GitHub-built image**
+
+In GitHub, go to your profile → Packages → `hanwha-monitor-server` → Package settings. Either make it public, or log Unraid in to ghcr.io. Then in Unraid go to **Docker → Add Container** and fill it in from `server/unraid-template.xml`. Set the repository to `ghcr.io/<your-username>/hanwha-monitor-server:latest`.
+
+**Check it:** open `http://<unraid-ip>:8420/`. You should see the dashboard showing "Waiting for the monitor PC".
+
+Environment options:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `API_KEY` | *(blank)* | Optional shared key. If set, enter the same key in the PC app and the iPhone app. |
+| `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
+| `TZ` | | Your timezone, used for the "alarms today" count. |
+
+---
+
+## 2b. Machine PC on a different network from Unraid: use Tailscale
+
+The PC at the machine has to be able to reach Unraid. If they're on different networks (workshop vs home), link them with **Tailscale**. It's a free private VPN: there's no port forwarding, and nothing is exposed to the internet.
+
+1. **Unraid:** go to Apps → search **Tailscale** → install the plugin. Then go to Settings → Tailscale → **Log in** and sign in with a Google or Microsoft account.
+2. **Machine PC:** install Tailscale from tailscale.com/download and sign in with the **same account**. Leave it set to start with Windows (the default).
+3. At login.tailscale.com → **Machines**, note Unraid's Tailscale address (`100.x.y.z`) or its name (e.g. `tower`).
+4. In the PC app, set the **Server URL** to `http://100.x.y.z:8420` (or `http://tower:8420`) and click **Test server**.
+5. *(Optional)* Install Tailscale on the iPhone too. The app can then use the same `100.x.y.z` address from anywhere: home, the workshop or 4G.
+
+Tailscale doesn't touch the PC's connection to the lathe (192.168.11.x). If the internet link drops, the PC app keeps polling the machine. Alarms that start and clear while the link is down are held and sent when it comes back.
+
+---
+
+## 3. Windows app on the machine PC
+
+1. Unzip `HanwhaMonitor-exe` into a folder, e.g. `C:\HanwhaMonitor\`.
+2. Copy **`Fwlib32.dll` and `fwlibe1.dll`** from `C:\Users\Hanwha\focas\` into the same folder. The app also finds them in that old folder automatically.
+3. **Stop the old VS Code script** so the two don't both poll the machine.
+4. Run `HanwhaMonitor.exe`. If Windows SmartScreen complains, click **More info → Run anyway**, since the exe isn't code-signed.
+5. On the **Settings** tab:
+   - **Machine IP**: `192.168.11.11`, port `8193`. These are already filled in from the old script.
+   - **Server URL**: `http://<unraid-ip>:8420`. Click **Test server**.
+   - Tick **Start automatically when Windows starts** and **Start minimised to the tray**.
+   - Click **Save & apply**.
+6. The two cards at the top show **Machine: Connected** and **Server: Connected**.
+
+Closing the window hides it to the tray. It keeps monitoring, and the tray icon colour shows the machine state. To exit, right-click the tray icon → **Quit**.
+Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files. The old script once wrote a 33 MB log.
+
+**Build the exe on the PC yourself (optional):** run `agent\build.bat`. It needs `uv` or 32-bit Python.
+**Run from source:** `pythonw -m hanwha_agent`. Add `--headless` to log to the console instead of opening the window, or `--demo` to use a simulated machine.
+
+---
+
+## 4. iPhone app (Sideloadly, free Apple ID)
+
+1. On the iPhone, turn on **Settings → Privacy & Security → Developer Mode**. The phone restarts.
+2. In Sideloadly on your PC, drop in `HanwhaMonitor.ipa`, enter your Apple ID and click **Start**.
+   In Advanced options, **leave "Remove app extensions" unticked**. The Live Activity lives in an extension.
+3. On the phone, go to **Settings → General → VPN & Device Management** → trust your Apple ID.
+4. Open **XE35 Monitor** → **Settings**:
+   - Enter the server URL `http://<unraid-ip>:8420` → **Test connection**. Allow local network access when asked.
+   - Allow notifications.
+5. The Live Activity starts on its own. Lock the phone to see it, or swipe home to see the Dynamic Island.
+
+**What you get**
+
+- **Status:** a big colour header (Running = green, Standby = yellow, Alarm = red, Off = grey) showing how long it's been in that state.
+  - Part count / required, with a progress bar and estimated finish time.
+  - Last cycle time, plus a live timer for the current cycle.
+  - Program number, program comment, and the Main/Sub path modes.
+  - Active alarms.
+- **Alarms:** full history grouped by day. Each entry shows the FANUC-style code (e.g. `EX1051`), the message, Main/Sub path, the time it happened and how long it lasted. Tap one for details, or filter to active alarms only.
+- **Settings:** server, Live Activity, background updates, notifications (new alarm, machine stopped, machine off), and clearing the alarm history.
+- **Dynamic Island:**
+  - Compact: status-colour dot with `118/500`.
+  - Minimal: a status-coloured progress ring.
+  - Long-press: status, parts, cycle times, program and the current alarm.
+- **Lock screen:** status colour bar, parts/required with progress, cycle time with a live current-cycle timer, and up to two active alarms. It greys out with "No update since…" if the phone loses contact.
+
+### Limits of a free Apple ID (and how the app works around them)
+
+- **No Apple push notifications.** The server can't wake the phone, so the app keeps itself running in the background by playing *silent audio*. This mixes with music, so it doesn't interrupt anything. That's what keeps the Live Activity and alarm notifications live. You can turn it off in Settings to save battery. If iOS ever kills the app, the Live Activity greys out, and a background refresh roughly every 15 minutes is the fallback.
+- **8-hour Live Activity limit.** iOS ends every Live Activity after 8 hours. The app replaces it whenever you open the app. If it's been running all day, you'll get a reminder notification to open the app.
+- **7-day signing.** Free-signed apps stop launching after 7 days. Turn on Sideloadly's auto-refresh (it runs on your PC over Wi-Fi) or re-sideload weekly.
+- **Network.** The phone needs to reach Unraid: either be on the home Wi-Fi, or run Tailscale on the phone (section 2b) so it works from anywhere.
+
+A paid Apple Developer account ($99/yr) would remove the first three limits. The server would then push updates through Apple instead, and the app would need a small extension to support that.
+
+---
+
+## Testing without the machine
+
+Tick **Demo mode** in the PC app's Settings. It simulates cycles, part counts, standby and random alarms such as `EX1051 BARFEEDER EMERGENCY STOP`. This lets you test the server, the iPhone app, notifications and the Live Activity at home. The app shows a "Demo data" label while it's on.
+
+---
+
+## What's read from the machine (FOCAS)
+
+| Data | FOCAS call | Notes |
+|---|---|---|
+| Run state / mode / e-stop | `cnc_statinfo` per path | Running = START on any path; Alarm = any alarm or E-stop; otherwise Standby. Off = can't connect 3 times in a row. |
+| Alarms | `cnc_alarm2` + `cnc_rdalmmsg2` per path | Shown as FANUC codes: `EX1051`, `SV0401`, `OT0500`, `DS0300`… |
+| Part count / required | macro `#3901` / `#3902` (fallback: parameters 6711 / 6713) | Read from the **Counter path** setting (default 1 = Main). |
+| Total parts | parameter 6712 | |
+| Cycle time | Time between part-count increments while running (fallback: CNC cycle timer `cnc_rdtimer` type 3) | "Current cycle" is the live CNC cycle timer. |
+| Program | `cnc_exeprgname` (fallback `cnc_rdprgnum`) + comment from `cnc_rdprogdir3` | |
+
+If the part count or program looks wrong on the real machine, try **Counter path = 2** first. Then send me the PC app's log.
+
+## What was fixed from the original script
+
+- Fwlib32 functions are `stdcall` returning `short`. The script loaded them as `cdll` with no return type, which is where the odd error numbers `65520` / `74383344` came from (they're really `-16` = socket error).
+- **It never reconnected.** Once the machine dropped off, it logged ~4,700 errors and sent ~80 watchdog pushes. The new app frees the handle and reconnects automatically.
+- The watchdog crashed on `response.code` (should have been `status_code`), and its message was missing the `f` in its f-string.
+- The log file grew without limit.
+- The Pushover keys were hard-coded in the old script. They're no longer used, so you may want to regenerate them in Pushover.
+
+## API (for reference)
+
+`GET /api/status` · `GET /api/alarms?limit=100&before=<epoch>&active=1` · `GET /api/states?hours=24` · `POST /api/ingest` (agent) · `DELETE /api/alarms` (clears history) · `GET /api/health`. When `API_KEY` is set, send the key as the `X-API-Key` header or as `?key=`.

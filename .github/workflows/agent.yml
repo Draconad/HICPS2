@@ -1,0 +1,34 @@
+name: Windows agent (HanwhaMonitor.exe)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["agent/**", ".github/workflows/agent.yml"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x86          # Fwlib32.dll is 32-bit
+
+      - name: Install dependencies
+        working-directory: agent
+        run: |
+          python -c "import struct; assert struct.calcsize('P') == 4, '32-bit Python required'"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build exe
+        working-directory: agent
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name HanwhaMonitor --icon icon.ico --hidden-import pystray._win32 run.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HanwhaMonitor-exe
+          path: agent/dist/HanwhaMonitor.exe

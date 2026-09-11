@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>hanwha-monitor</Name>
+  <Repository>ghcr.io/YOUR-GITHUB-USERNAME/hanwha-monitor-server:latest</Repository>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Overview>Hanwha XE35 lathe monitor server: stores machine status and alarm history for the iPhone app. Web dashboard on port 8420.</Overview>
+  <WebUI>http://[IP]:[PORT:8420]/</WebUI>
+  <Config Name="Web / API port" Target="8420" Default="8420" Mode="tcp" Type="Port" Display="always" Required="true">8420</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/hanwha-monitor/data" Mode="rw" Type="Path" Display="always" Required="true">/mnt/user/appdata/hanwha-monitor/data</Config>
+  <Config Name="Timezone" Target="TZ" Default="Europe/London" Type="Variable" Display="always" Required="false">Europe/London</Config>
+  <Config Name="API key (optional)" Target="API_KEY" Default="" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Agent timeout (s)" Target="AGENT_TIMEOUT" Default="30" Type="Variable" Display="advanced" Required="false">30</Config>
+</Container>
