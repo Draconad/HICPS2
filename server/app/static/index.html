@@ -19,18 +19,18 @@
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
   h1 { font-size: 20px; margin: 0; }
   .sub { color: var(--muted); font-size: 13px; }
-  /* the big status banner: readable from across the shop floor */
-  body { border-top: 8px solid var(--st, var(--off)); transition: border-color .3s; }
-  .status { --st: var(--off); display: flex; align-items: center; gap: clamp(14px, 3vw, 28px); margin-bottom: 16px;
-            padding: clamp(18px, 3.5vw, 30px) clamp(18px, 4vw, 34px); border-radius: 20px; background: var(--st);
+  /* status banner: easy to read at a glance */
+  body { border-top: 5px solid var(--st, var(--off)); transition: border-color .3s; }
+  .status { --st: var(--off); display: flex; align-items: center; gap: clamp(12px, 2vw, 18px); margin-bottom: 16px;
+            padding: clamp(12px, 2vw, 18px) clamp(16px, 2.6vw, 22px); border-radius: 16px; background: var(--st);
             color: var(--st-ink, #fff); transition: background-color .3s; }
-  .status .ico { font-size: clamp(44px, 10vw, 84px); line-height: 1; flex: none; }
+  .status .ico { font-size: clamp(28px, 5vw, 44px); line-height: 1; flex: none; }
   .status .main { min-width: 0; flex: 1; }
-  .status .state { font-size: clamp(38px, 9.5vw, 96px); font-weight: 850; line-height: .95; letter-spacing: .01em;
+  .status .state { font-size: clamp(28px, 5.5vw, 50px); font-weight: 800; line-height: 1; letter-spacing: .01em;
                    text-transform: uppercase; }
-  .status .detail { font-size: clamp(16px, 2.6vw, 22px); font-weight: 600; margin-top: 8px; opacity: .92;
+  .status .detail { font-size: clamp(14px, 2vw, 17px); font-weight: 600; margin-top: 4px; opacity: .92;
                     overflow-wrap: anywhere; }
-  .status .since { font-size: clamp(16px, 2.6vw, 24px); font-weight: 600; margin-top: 6px; opacity: .85;
+  .status .since { font-size: clamp(13px, 1.8vw, 15px); font-weight: 600; margin-top: 2px; opacity: .85;
                    font-variant-numeric: tabular-nums; }
   .status .since b { font-weight: 800; }
   .status .state { white-space: nowrap; }
@@ -41,10 +41,9 @@
   .status.s-standby { --st: var(--stby); --st-ink: #1d1500; }
   .status.s-off     { --st: #3a3d42; }
   .status.s-over    { --st: var(--accent); --st-ink: #1a0b00; }
-  .status.s-over .state { font-size: clamp(30px, 6vw, 56px); }
-  .status .state small { display: block; font-size: .42em; letter-spacing: .04em; margin-bottom: .12em; }
-  .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.2s ease-in-out infinite; }
-  @keyframes alarmflash { 50% { background-color: #8e1712; } }
+  .status.s-over .state { font-size: clamp(24px, 4vw, 40px); }
+  .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
+  @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
@@ -221,8 +220,7 @@ async function status() {
   const st = $("status");
   st.className = "status s-" + kind;
   $("sticon").innerHTML = icon;
-  if (kind === "over") $("ststate").innerHTML = "<small>Running &ndash;</small>Over producing";
-  else $("ststate").textContent = label;
+  $("ststate").textContent = label;
   $("stdetail").textContent = detail;
   const since = bar ? s.bar_change_since : s.state_since;
   // like the app: "Since 14:02 · 1 hr, 45 min" (the phone's clock, corrected for drift)
