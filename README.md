@@ -81,6 +81,7 @@ Environment options:
 |---|---|---|
 | `API_KEY` | *(blank)* | Optional shared key. If set, enter the same key in the PC app and the iPhone app. |
 | `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
+| `STANDBY_DELAY` | `4` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles). |
 | `TZ` | | Your timezone, used for the "alarms today" count. |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(blank)* | Apple push. See section 4. Put the `AuthKey_….p8` in the data folder. |
 

@@ -35,11 +35,13 @@ except ImportError:  # pragma: no cover
     from .apns import APNs
     from .push import PushService
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
 PORT = int(os.environ.get("PORT", "8420"))
+# Running -> standby only shows once standby has lasted this long (hides the gap between part cycles).
+STANDBY_DELAY = float(os.environ.get("STANDBY_DELAY", "4"))
 STATIC = Path(__file__).parent / "static"
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
@@ -108,7 +110,12 @@ def effective_state(now: float) -> tuple[str, str, bool]:
         return "off", "Monitor PC not reporting", False
     if not latest.get("machine_connected"):
         return "off", latest.get("state_detail") or "Machine off / unreachable", True
-    return latest.get("state", "off"), latest.get("state_detail", ""), True
+    state = latest.get("state", "off")
+    if (state == "standby" and meta.get("state") == "running"
+            and now - (meta.get("raw_since") or now) < STANDBY_DELAY):
+        # the short pause between part cycles - keep showing running
+        return "running", (meta.get("last_running") or {}).get("detail") or "Running", True
+    return state, latest.get("state_detail", ""), True
 
 
 def track_state(now: float):
@@ -232,6 +239,11 @@ def ingest(snap: dict) -> dict:
         snap["received_at"] = now
         timer = snap.get("cycle_timer_s")
         snap["cycle_started_at"] = (now - timer) if (timer and snap.get("state") == "running") else None
+        if snap.get("state") != latest.get("state"):
+            meta["raw_since"] = now
+        if snap.get("state") == "running":
+            meta["last_running"] = {"detail": snap.get("state_detail"), "cycle_started_at": snap.get("cycle_started_at"),
+                                    "cycle_timer_s": snap.get("cycle_timer_s")}
         latest.clear()
         latest.update(snap)
         meta["last_seen"] = now
@@ -257,6 +269,8 @@ def status() -> dict:
         parts, req, cyc = latest.get("parts"), latest.get("parts_required"), latest.get("last_cycle_s")
         eta = (req - parts) * cyc if (parts is not None and req and cyc and req > parts) else None
         running = state == "running"
+        # during the short between-cycles pause the agent reports standby: keep the last cycle clock
+        cyc_src = latest if latest.get("state") == "running" else (meta.get("last_running") or {})
         return {
             "server_time": now,
             "machine_name": latest.get("machine_name") or "Hanwha XE35",
@@ -271,8 +285,8 @@ def status() -> dict:
             "parts_required": req,
             "parts_total": latest.get("parts_total"),
             "last_cycle_s": cyc,
-            "cycle_timer_s": latest.get("cycle_timer_s") if running else None,
-            "cycle_started_at": latest.get("cycle_started_at") if running else None,
+            "cycle_timer_s": cyc_src.get("cycle_timer_s") if running else None,
+            "cycle_started_at": cyc_src.get("cycle_started_at") if running else None,
             "eta_s": round(eta) if eta else None,
             "program": latest.get("program") or {},
             "paths": latest.get("paths") or [],
