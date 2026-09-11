@@ -79,10 +79,10 @@ struct MachineActivityAttributes: ActivityAttributes {
 
         var kind: MachineStateKind { barChange == true && state == .running ? .barChange : state }
         var isOverProducing: Bool { overProducing == true && kind == .running }
-        /// "Running – Over producing" or the plain state name
-        var headline: String { isOverProducing ? "Running – Over producing" : kind.label }
+        /// "Running – Overrun" or the plain state name
+        var headline: String { isOverProducing ? "Running – Overrun" : kind.label }
         /// Short form for the Dynamic Island
-        var shortHeadline: String { isOverProducing ? "Over producing" : kind.label }
+        var shortHeadline: String { isOverProducing ? "Overrun" : kind.label }
         var headlineColor: Color { isOverProducing ? MachineStateKind.overProducingColor : kind.color }
         var barChangeStart: Date? { barChangeStartEpoch.map { Date(timeIntervalSince1970: $0) } }
         var cycleStart: Date? { cycleStartEpoch.map { Date(timeIntervalSince1970: $0) } }

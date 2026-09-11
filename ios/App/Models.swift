@@ -150,7 +150,7 @@ struct MachineStatus: Decodable, Equatable {
         return max(0, r - p)
     }
     var isOverProducing: Bool { overProducing == true && state == .running }
-    var headline: String { isOverProducing ? "Running – Over producing" : state.label }
+    var headline: String { isOverProducing ? "Running – Overrun" : state.label }
     var headlineColor: Color { isOverProducing ? MachineStateKind.overProducingColor : state.color }
 
     /// When the required count will be reached at the current cycle time (phone clock), while running

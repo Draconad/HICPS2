@@ -337,7 +337,7 @@ def ingest(snap: dict) -> dict:
                 and parts - prev_parts <= 5 and latest.get("parts_required") == req):
             meta["job_complete"] = {"at": now, "parts": parts, "required": req}
             log.info("Job complete: %s/%s", parts, req)
-        # when the count first sat at exactly the required count (for "over producing")
+        # when the count first sat at exactly the required count (for "overrun")
         if req and parts is not None and parts == req:
             if meta.get("at_req") != [parts, req]:
                 meta["at_req"], meta["at_req_since"] = [parts, req], now

@@ -142,7 +142,7 @@ The Program box always shows your main part program, not the subprogram it has c
 ### Status at a glance
 The dashboard opens with a large status banner, readable from across the shop: green **Running**, blue **Bar change**, amber **Standby**, grey **Off**, and a flashing red **Alarm** that shows the alarm code and message. It also shows when that state started and for how long, e.g. "Since 14:02 · 1 hr, 45 min". The browser tab title and the strip along the top of the page change colour too.
 
-If the machine keeps running past the required count, the status changes to orange **Running – Over producing**, with how many parts over it is. This shows on the dashboard, the iPhone app, the Live Activity and the PC app. It usually means **Stop at required count** is off.
+If the machine keeps running past the required count, the status changes to orange **Running – Overrun**, with how many parts over it is. This shows on the dashboard, the iPhone app, the Live Activity and the PC app. It usually means **Stop at required count** is off.
 
 ### Finish time and job complete
 While the machine is running towards a required count, the part count shows the estimated finish time, e.g. "Done ~17:40", based on the last cycle time. This is on the dashboard, the app, the Live Activity and the PC app. When the count reaches the required count, a **✅ Job complete** notification is sent. It can be switched off in the app under Settings > Notifications.

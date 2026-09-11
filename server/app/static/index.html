@@ -34,14 +34,12 @@
                    font-variant-numeric: tabular-nums; }
   .status .since b { font-weight: 800; }
   .status .state { white-space: nowrap; }
-  .status.s-over .state { white-space: normal; }
   @media (max-width: 520px) { .status .ico { display: none; } }
   .status.s-running { --st: var(--run); --st-ink: #03140a; }
   .status.s-bar     { --st: var(--bar); }
   .status.s-standby { --st: var(--stby); --st-ink: #1d1500; }
   .status.s-off     { --st: #3a3d42; }
   .status.s-over    { --st: var(--accent); --st-ink: #1a0b00; }
-  .status.s-over .state { font-size: clamp(24px, 4vw, 40px); }
   .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
   @keyframes alarmflash { 50% { background-color: #b0231b; } }
   @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
@@ -205,7 +203,7 @@ async function status() {
   const now = s.server_time || Date.now() / 1000;
   const kind = bar ? "bar" : (s.state === "running" && s.over_producing) ? "over"
              : (["running", "standby", "alarm", "off"].includes(s.state) ? s.state : "off");
-  const label = { running: "Running", over: "Running – Over producing", bar: "Bar change", standby: "Standby",
+  const label = { running: "Running", over: "Running – Overrun", bar: "Bar change", standby: "Standby",
                   alarm: "Alarm", off: "Off" }[kind];
   const icon = { running: "&#9654;", over: "&#9654;", bar: "&#8635;", standby: "&#10074;&#10074;", alarm: "&#9888;",
                  off: "&#9211;" }[kind];

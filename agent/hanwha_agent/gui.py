@@ -712,7 +712,7 @@ class App:
         detail = snap.get("state_detail") or ""
         req_, parts_ = snap.get("parts_required"), snap.get("parts")
         if state == "running" and req_ and parts_ is not None and parts_ >= req_:
-            detail = f"Running – Over producing ({parts_ - req_} past the required count)"
+            detail = f"Running – Overrun ({parts_ - req_} past the required count)"
         self.detail_lbl.configure(text=detail)
         self.demo_lbl.configure(text="DEMO MODE — simulated data" if cfg.demo_mode else "")
         st = self.updater.status if self.updater else ""
