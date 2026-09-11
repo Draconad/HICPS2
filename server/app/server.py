@@ -6,6 +6,7 @@ status to the iPhone app plus a small web dashboard.
   POST /api/ingest     agent -> server snapshot
   GET  /api/status     current machine status + active alarms
   GET  /api/alarms     alarm history  (?limit=100&before=<epoch>&active=1)
+  DELETE /api/alarms   clear cleared history  (?demo=1: delete demo-mode alarms only)
   GET  /api/states     state change log (?hours=24)
   GET  /api/health
   POST /api/push/register   {kind: alert|la|la_start, token, activity_id?, env?, prefs?}
@@ -34,7 +35,7 @@ except ImportError:  # pragma: no cover
     from .apns import APNs
     from .push import PushService
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
@@ -64,6 +65,9 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS state_log_ts ON state_log(ts DESC);
         CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
     """)
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(alarms)")}
+    if "demo" not in cols:   # 1 = from the agent's demo mode, 0 = real machine, NULL = recorded before 1.2.0
+        c.execute("ALTER TABLE alarms ADD COLUMN demo INTEGER")
     return c
 
 
@@ -91,6 +95,7 @@ def alarm_row(r: sqlite3.Row, now: float) -> dict:
     end = d["cleared_at"] or now
     d["duration_s"] = round(max(0.0, end - d["started_at"]), 1)
     d["active"] = d["cleared_at"] is None
+    d["demo"] = bool(d.get("demo"))
     return d
 
 
@@ -116,7 +121,27 @@ def track_state(now: float):
         kv_set("meta", meta)
 
 
-def upsert_alarms(alarms: list[dict], offset: float, now: float, machine_connected: bool) -> list[str]:
+# The alarms the agent's demo machine makes up (focas.MockMachine) - used to spot demo alarms recorded
+# before the server started tagging them.
+DEMO_ALARMS = {(1051, "BARFEEDER EMERGENCY STOP"), (1010, "MAIN CHUCK SENSOR ERR. ALARM"),
+               (1049, "BARFEEDER AUTO OFF"), (401, "(Z1)SERVO V-READY OFF")}
+
+
+def _demo_where() -> tuple[str, list]:
+    """SQL matching demo alarms: tagged ones, plus untagged (pre-1.2.0) ones that match the demo list
+    and happened before the server first heard from the real machine."""
+    first_real = meta.get("first_real_at")
+    legacy = " OR ".join("(number=? AND message=?)" for _ in DEMO_ALARMS)
+    args: list = [x for pair in sorted(DEMO_ALARMS) for x in pair]
+    sql = f"(demo=1 OR (demo IS NULL AND ({legacy})"
+    if first_real:
+        sql += " AND started_at < ?"
+        args.append(first_real)
+    return sql + "))", args
+
+
+def upsert_alarms(alarms: list[dict], offset: float, now: float, machine_connected: bool,
+                  demo: bool = False) -> list[str]:
     """Merge the agent's alarm episodes into history. Returns ids of cleared episodes to acknowledge."""
     ack: list[str] = []
     active_keys: set[str] = set()
@@ -134,9 +159,10 @@ def upsert_alarms(alarms: list[dict], offset: float, now: float, machine_connect
 
     def insert(a: dict, started: float, cleared: float | None):
         db.execute("""INSERT OR IGNORE INTO alarms(id,key,path,path_name,code,type,type_name,number,axis,message,
-                      started_at,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                      started_at,cleared_at,demo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                    (a["id"], a["key"], a.get("path"), a.get("path_name"), a.get("code"), a.get("type"),
-                    a.get("type_name"), a.get("number"), a.get("axis"), a.get("message"), started, cleared))
+                    a.get("type_name"), a.get("number"), a.get("axis"), a.get("message"), started, cleared,
+                    1 if demo else 0))
         if cleared is None:
             log.info("ALARM %s [%s] %s", a.get("code"), a.get("path_name"), a.get("message"))
 
@@ -190,9 +216,12 @@ def ingest(snap: dict) -> dict:
         sent_at = float(snap.get("sent_at") or now)
         offset = now - sent_at if abs(now - sent_at) > 3 else 0.0   # correct the PC's clock drift
         connected = bool(snap.get("machine_connected"))
+        demo = bool(snap.get("demo"))
+        if connected and not demo and not meta.get("first_real_at"):
+            meta["first_real_at"] = now
         db.execute("BEGIN")
         try:
-            ack = upsert_alarms(snap.get("alarms") or [], offset, now, connected)
+            ack = upsert_alarms(snap.get("alarms") or [], offset, now, connected, demo)
             db.execute("COMMIT")
         except Exception:
             db.execute("ROLLBACK")
@@ -264,7 +293,12 @@ def alarm_history(limit: int, before: float | None, active_only: bool) -> dict:
     args.append(limit)
     with _lock:
         rows = [alarm_row(r, now) for r in db.execute(sql, args).fetchall()]
-    return {"alarms": rows, "next_before": rows[-1]["started_at"] if len(rows) == limit else None}
+        where, wargs = _demo_where()
+        demo_ids = {r["id"] for r in db.execute(f"SELECT id FROM alarms WHERE {where}", wargs).fetchall()}
+    for r in rows:
+        r["demo"] = r["id"] in demo_ids
+    return {"alarms": rows, "next_before": rows[-1]["started_at"] if len(rows) == limit else None,
+            "demo_count": len(demo_ids)}
 
 
 def state_history(hours: float) -> dict:
@@ -285,6 +319,16 @@ def _kv_set_locked(k, v):
 
 
 push = PushService(db, _lock, APNs(), lambda: status(), _kv_get_locked, _kv_set_locked)
+
+
+def clear_demo() -> dict:
+    """Delete every alarm that came from the agent's demo mode (active ones too)."""
+    with _lock:
+        where, args = _demo_where()
+        n = db.execute(f"DELETE FROM alarms WHERE {where}", args).rowcount
+        db.execute("DELETE FROM alarm_alias WHERE alarm_id NOT IN (SELECT id FROM alarms)")
+    log.info("Cleared %d demo alarm(s)", n)
+    return {"ok": True, "deleted": n}
 
 
 def clear_history() -> dict:
@@ -369,6 +413,8 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "POST" and path == "/api/push/test":
                     return self._json(push.test_alert())
             if method == "DELETE" and path == "/api/alarms":
+                if (qs.get("demo") or ["0"])[0].lower() in ("1", "true", "yes"):
+                    return self._json(clear_demo())
                 return self._json(clear_history())
             return self._json({"detail": "not found"}, 404)
         except (ValueError, KeyError, TypeError) as e:

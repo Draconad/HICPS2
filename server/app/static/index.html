@@ -33,6 +33,15 @@
   .active { color: var(--alarm); font-weight: 700; }
   .wrap { overflow-x: auto; }
   .muted { color: var(--muted); }
+  .h2row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 8px; }
+  .h2row h2 { margin: 0; }
+  .btn { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+         border: 1px solid var(--line); background: var(--card); color: var(--alarm); }
+  .btn:hover { border-color: var(--alarm); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 1px 6px; margin-left: 6px;
+         border-radius: 4px; background: var(--line); color: var(--muted); vertical-align: middle; }
+  tr.demo td { opacity: .7; }
 </style>
 </head>
 <body>
@@ -54,7 +63,10 @@
   <h2>Active alarms</h2>
   <div class="card wrap"><table><tbody id="active"><tr><td class="muted">None</td></tr></tbody></table></div>
 
-  <h2>Alarm history</h2>
+  <div class="h2row">
+    <h2>Alarm history</h2>
+    <button class="btn" id="cleardemo" hidden>Clear demo alarms</button>
+  </div>
   <div class="card wrap"><table>
     <thead><tr><th>Time</th><th>Code</th><th>Message</th><th>Path</th><th>Duration</th></tr></thead>
     <tbody id="history"></tbody>
@@ -92,10 +104,24 @@ async function status() {
 }
 async function history() {
   const r = await (await fetch("api/alarms" + (q ? q + "&" : "?") + "limit=200")).json();
-  $("history").innerHTML = r.alarms.map(a => `<tr><td>${t(a.started_at)}</td><td class="code ${a.active ? "active" : ""}">${esc(a.code)}</td>
+  const btn = $("cleardemo");
+  btn.hidden = !r.demo_count;
+  btn.textContent = `Clear demo alarms (${r.demo_count || 0})`;
+  $("history").innerHTML = r.alarms.map(a => `<tr${a.demo ? ' class="demo"' : ""}><td>${t(a.started_at)}</td><td class="code ${a.active ? "active" : ""}">${esc(a.code)}${a.demo ? '<span class="tag">DEMO</span>' : ""}</td>
     <td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${a.active ? '<span class="active">Active</span>' : dur(a.duration_s)}</td></tr>`).join("")
     || `<tr><td colspan="5" class="muted">No alarms recorded yet</td></tr>`;
 }
+$("cleardemo").onclick = async () => {
+  const btn = $("cleardemo");
+  if (!confirm("Delete all alarms recorded while the monitor was in demo mode? Real machine alarms are kept.")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("api/alarms" + (q ? q + "&" : "?") + "demo=1", { method: "DELETE" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    await history(); await status();
+  } catch (e) { alert("Couldn't clear demo alarms: " + e.message); }
+  btn.disabled = false;
+};
 const tick = () => status().catch(e => $("detail").textContent = "Can't reach server: " + e);
 tick(); history(); setInterval(tick, 2000); setInterval(history, 15000);
 </script>
