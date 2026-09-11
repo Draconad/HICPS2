@@ -132,6 +132,8 @@ struct OverrunBadge: View {
             .padding(.horizontal, size * 0.6)
             .padding(.vertical, size * 0.2)
             .background(MachineStateKind.overProducingColor, in: Capsule())
+            .padding(size * 0.2)
+            .background(Color.black.opacity(0.18), in: Capsule())   // dark ring around it
             .fixedSize()
     }
 }
