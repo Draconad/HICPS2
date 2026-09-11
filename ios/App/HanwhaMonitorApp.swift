@@ -46,6 +46,7 @@ struct RootView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .tint(Color(red: 0.18, green: 0.44, blue: 0.93))
+        .tint(Color(red: 0.96, green: 0.46, blue: 0.13))   // Hanwha orange, to go with the black theme
+        .preferredColorScheme(.dark)
     }
 }

@@ -13,7 +13,7 @@ struct MachineLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MachineActivityAttributes.self) { context in
             LockScreenView(name: context.attributes.machineName, s: context.state, stale: context.isStale)
-                .activityBackgroundTint(Color.black.opacity(0.78))
+                .activityBackgroundTint(Color.black)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             let s = context.state

@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
 <title>Hanwha Monitor</title>
 <style>
   :root {
-    --bg: #f4f5f7; --card: #fff; --ink: #1d2127; --muted: #6b7280; --line: #e6e8ec;
-    --run: #2fb344; --bar: #2f8cff; --stby: #e0a800; --alarm: #e5383b; --off: #8a8f98; --accent: #2f6fed;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1114; --card: #1a1d22; --ink: #eef0f3; --muted: #9aa1ab; --line: #2a2e35; }
+    color-scheme: dark;
+    --bg: #000; --card: #141414; --ink: #f2f2f2; --muted: #8e8e93; --line: #262626;
+    --run: #30c24a; --bar: #2f8cff; --stby: #f2b90c; --alarm: #ff453a; --off: #8a8f98; --accent: #f47521;
   }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
@@ -31,12 +31,14 @@
   th { color: var(--muted); font-size: 12px; font-weight: 600; }
   .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
   .active { color: var(--alarm); font-weight: 700; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: #1b1b1b; }
   .wrap { overflow-x: auto; }
   .muted { color: var(--muted); }
   .h2row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 8px; }
   .h2row h2 { margin: 0; }
   .btn { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer;
-         border: 1px solid var(--line); background: var(--card); color: var(--alarm); }
+         border: 1px solid var(--line); background: #1f1f1f; color: var(--alarm); }
   .btn:hover { border-color: var(--alarm); }
   .btn:disabled { opacity: .5; cursor: default; }
   .tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 1px 6px; margin-left: 6px;
@@ -94,8 +96,8 @@ async function status() {
   $("bar").style.width = (s.parts_required ? Math.min(100, 100 * s.parts / s.parts_required) : 0) + "%";
   $("eta").innerHTML = [s.eta_s ? `Done in ~${dur(s.eta_s)}` : "",
     s.work_counter == null ? "" : (s.work_counter ? '<span style="color:var(--run);font-weight:600">&#9632; Stops at count</span>'
-                                                  : '<span style="color:#d97706;font-weight:600">&infin; Won\'t stop at count</span>')]
-    .filter(Boolean).join(" &middot; ");
+                                                  : '<span style="color:#ff9f0a;font-weight:600">&infin; Won\'t stop at count</span>')]
+    .filter(Boolean).join("<br>");
   $("cycle").textContent = dur(s.last_cycle_s);
   $("cur").textContent = s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "";
   const p = s.program || {};

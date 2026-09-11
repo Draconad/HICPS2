@@ -10,7 +10,6 @@ import tkinter.font as tkfont
 import webbrowser
 from datetime import datetime
 from tkinter import messagebox, ttk
-from tkinter.scrolledtext import ScrolledText
 
 from .collector import Collector
 from . import signals
@@ -22,11 +21,14 @@ log = logging.getLogger("hanwha.gui")
 
 STATE_COLORS = {"running": "#2fb344", "barchange": "#2f8cff", "standby": "#f2b90c", "alarm": "#e5383b", "off": "#8a8f98"}
 STATE_LABELS = {"running": "RUNNING", "barchange": "BAR CHANGE", "standby": "STANDBY", "alarm": "ALARM", "off": "OFF"}
-BG = "#f4f5f7"
-CARD = "#ffffff"
-INK = "#1d2127"
-MUTED = "#6b7280"
-HEADER = "#1d2127"
+BG = "#000000"
+CARD = "#141414"
+FIELD = "#1f1f1f"      # inputs, buttons, tabs
+LINE = "#2c2c2c"
+INK = "#f2f2f2"
+MUTED = "#8e8e93"
+HEADER = "#000000"
+ACCENT = "#f47521"     # Hanwha orange
 
 try:  # optional system tray support
     import pystray
@@ -79,9 +81,10 @@ class App:
 
         self.root = tk.Tk()
         self.root.title(f"Hanwha Monitor — {cfg.machine_name}")
-        self.root.geometry("600x680")
-        self.root.minsize(520, 560)
+        self.root.geometry("620x800")
+        self.root.minsize(540, 640)
         self.root.configure(bg=BG)
+        self._dark_title_bar()
         self._set_window_icon()
         self._styles()
         self._build()
@@ -115,29 +118,83 @@ class App:
         except tk.TclError:
             pass
         base = self._font(10, False)
-        s.configure(".", font=base, background=BG, foreground=INK)
+        s.configure(".", font=base, background=BG, foreground=INK, fieldbackground=FIELD, bordercolor=LINE,
+                    lightcolor=LINE, darkcolor=LINE, troughcolor=FIELD, selectbackground=ACCENT,
+                    selectforeground="#000000", insertcolor=INK, focuscolor=ACCENT)
+        s.map(".", foreground=[("disabled", "#5a5a5e")])
+        s.configure("TFrame", background=BG)
+        s.configure("TLabel", background=BG, foreground=INK)
+        s.configure("TButton", background=FIELD, foreground=INK, bordercolor=LINE, padding=(10, 4))
+        s.map("TButton", background=[("disabled", CARD), ("pressed", "#333333"), ("active", "#2a2a2a")],
+              bordercolor=[("focus", ACCENT)])
+        s.configure("Accent.TButton", background=ACCENT, foreground="#000000", bordercolor=ACCENT)
+        s.map("Accent.TButton", background=[("pressed", "#d9621a"), ("active", "#ff8a3d")],
+              foreground=[("active", "#000000")])
+        s.configure("TEntry", fieldbackground=FIELD, foreground=INK, insertcolor=INK, bordercolor=LINE)
+        s.map("TEntry", bordercolor=[("focus", ACCENT)], lightcolor=[("focus", ACCENT)])
+        s.configure("TCheckbutton", background=BG, foreground=INK, indicatorbackground=FIELD,
+                    indicatorforeground=ACCENT)
+        s.map("TCheckbutton", background=[("active", BG)], indicatorbackground=[("selected", FIELD)])
+        for sb in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
+            s.configure(sb, background="#3a3a3a", troughcolor="#0f0f0f", bordercolor="#0f0f0f", lightcolor="#3a3a3a",
+                        darkcolor="#3a3a3a", arrowcolor=MUTED, gripcount=0, relief="flat")
+            s.map(sb, background=[("active", "#4a4a4a"), ("disabled", "#1a1a1a")])
         s.configure("Card.TFrame", background=CARD, relief="flat")
         s.configure("Card.TLabel", background=CARD, foreground=INK)
         s.configure("Muted.TLabel", background=CARD, foreground=MUTED, font=self._font(9, False))
         s.configure("CardTitle.TLabel", background=CARD, foreground=MUTED, font=self._font(9, True))
         s.configure("Value.TLabel", background=CARD, foreground=INK, font=self._font(20, True))
         s.configure("Small.TLabel", background=CARD, foreground=INK, font=self._font(11, False))
-        s.configure("TNotebook", background=BG, borderwidth=0)
-        s.configure("TNotebook.Tab", padding=(14, 6), font=self._font(10, False))
+        s.configure("TNotebook", background=BG, borderwidth=0, bordercolor=LINE)
+        s.configure("TNotebook.Tab", padding=(14, 6), font=self._font(10, False), background=CARD,
+                    foreground=MUTED, bordercolor=LINE)
+        s.map("TNotebook.Tab", background=[("selected", FIELD)], foreground=[("selected", INK)],
+              lightcolor=[("selected", ACCENT)])
         s.configure("Form.TLabel", background=BG, foreground=INK)
         s.configure("Hint.TLabel", background=BG, foreground=MUTED, font=self._font(9, False))
-        s.configure("TCheckbutton", background=BG)
         s.configure("Accent.TButton", font=self._font(10, True))
-        s.configure("Parts.Horizontal.TProgressbar", troughcolor="#e6e8ec", background="#2f6fed", thickness=8,
-                    borderwidth=0)
-        s.configure("Treeview", rowheight=24, font=self._font(9, False))
-        s.configure("Treeview.Heading", font=self._font(9, True))
+        s.configure("Horizontal.TProgressbar", troughcolor=FIELD, background=ACCENT, bordercolor=FIELD,
+                    lightcolor=ACCENT, darkcolor=ACCENT)
+        s.configure("Parts.Horizontal.TProgressbar", troughcolor=FIELD, background=ACCENT, thickness=8,
+                    borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
+        s.configure("Treeview", rowheight=24, font=self._font(9, False), background=CARD, fieldbackground=CARD,
+                    foreground=INK, bordercolor=LINE)
+        s.map("Treeview", background=[("selected", "#3a2414")], foreground=[("selected", INK)])
+        s.configure("Treeview.Heading", font=self._font(9, True), background=FIELD, foreground=MUTED,
+                    bordercolor=LINE, relief="flat")
+        s.map("Treeview.Heading", background=[("active", "#2a2a2a")])
+
+    def _scrolled_text(self, parent, **kw) -> tk.Text:
+        """Text box with a dark ttk scrollbar (tk's own scrollbar can't be recoloured on Windows).
+        Pack/grid the returned widget's .master."""
+        frame = tk.Frame(parent, bg=BG)
+        t = tk.Text(frame, highlightthickness=0, borderwidth=0, selectbackground=ACCENT, selectforeground="#000000",
+                    **kw)
+        sb = ttk.Scrollbar(frame, orient="vertical", command=t.yview)
+        t.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        t.pack(side="left", fill="both", expand=True)
+        return t
+
+    def _dark_title_bar(self):
+        """Dark Windows title bar (Windows 10 20H1+ / 11)."""
+        try:
+            import ctypes
+            self.root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            on = ctypes.c_int(1)
+            for attr in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (new id, then the pre-20H1 one)
+                if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), ctypes.sizeof(on)) == 0:
+                    break
+        except Exception:
+            pass
 
     def _set_window_icon(self):
         try:
             img = tk.PhotoImage(width=32, height=32)
-            img.put("#2f6fed", to=(0, 0, 32, 32))
-            img.put("#ffffff", to=(9, 9, 23, 23))
+            img.put("#000000", to=(0, 0, 32, 32))
+            img.put(ACCENT, to=(6, 6, 26, 26))
+            img.put("#000000", to=(11, 11, 21, 21))
             self.root.iconphoto(True, img)
             self._icon_img = img
         except Exception:
@@ -147,6 +204,7 @@ class App:
     def _build(self):
         header = tk.Frame(self.root, bg=HEADER, padx=18, pady=14)
         header.pack(fill="x")
+        tk.Frame(self.root, bg=LINE, height=1).pack(fill="x")
         left = tk.Frame(header, bg=HEADER)
         left.pack(side="left")
         self.title_lbl = tk.Label(left, text=self.cfg.machine_name, bg=HEADER, fg="white",
@@ -173,7 +231,7 @@ class App:
 
         foot = tk.Frame(self.root, bg=BG)
         foot.pack(fill="x", padx=16, pady=(0, 8))
-        self.demo_lbl = tk.Label(foot, text="", bg=BG, fg="#b45309", font=self._font(9, True))
+        self.demo_lbl = tk.Label(foot, text="", bg=BG, fg="#f59e0b", font=self._font(9, True))
         self.demo_lbl.pack(side="left")
         tk.Label(foot, text=f"v{VERSION}", bg=BG, fg=MUTED, font=self._font(8, False)).pack(side="right")
 
@@ -228,7 +286,7 @@ class App:
         for c, w, t in (("since", 70, "Since"), ("path", 50, "Path"), ("code", 70, "Code"), ("message", 300, "Message")):
             self.alarm_tree.heading(c, text=t, anchor="w")
             self.alarm_tree.column(c, width=w, anchor="w", stretch=(c == "message"))
-        self.alarm_tree.tag_configure("alarm", foreground="#b91c1c")
+        self.alarm_tree.tag_configure("alarm", foreground="#ff6b6b")
         self.alarm_tree.pack(fill="both", expand=True, pady=(4, 0))
         self.no_alarm_lbl = ttk.Label(af, text="No active alarms", style="Muted.TLabel")
         self.no_alarm_lbl.pack(anchor="w")
@@ -279,9 +337,9 @@ class App:
 
     def _build_log(self, nb):
         page = tk.Frame(nb, bg=BG, padx=6, pady=6)
-        self.log_text = ScrolledText(page, height=10, font=self._font(9, False, mono=True), bg="#101317", fg="#d6dae0",
+        self.log_text = self._scrolled_text(page, height=10, font=self._font(9, False, mono=True), bg="#0a0a0a", fg="#d6dae0",
                                      insertbackground="white", relief="flat", wrap="word")
-        self.log_text.pack(fill="both", expand=True)
+        self.log_text.master.pack(fill="both", expand=True)
         self.log_text.tag_configure("WARNING", foreground="#fbbf24")
         self.log_text.tag_configure("ERROR", foreground="#f87171")
         self.log_text.configure(state="disabled")
@@ -303,11 +361,11 @@ class App:
         self.snap_b_btn.pack(side="left", padx=8)
         self.snap_prog = ttk.Progressbar(row, maximum=1.0, length=140)
         self.snap_prog.pack(side="left", padx=(8, 0))
-        self.snap_lbl = ttk.Label(page, text="", style="Muted.TLabel")
+        self.snap_lbl = ttk.Label(page, text="", style="Hint.TLabel")
         self.snap_lbl.pack(anchor="w")
-        self.snap_text = ScrolledText(page, height=8, font=self._font(9, False, mono=True), bg="#101317", fg="#d6dae0",
+        self.snap_text = self._scrolled_text(page, height=8, font=self._font(9, False, mono=True), bg="#0a0a0a", fg="#d6dae0",
                                       insertbackground="white", relief="flat", wrap="none")
-        self.snap_text.pack(fill="both", expand=True, pady=(4, 6))
+        self.snap_text.master.pack(fill="both", expand=True, pady=(4, 6))
         use = tk.Frame(page, bg=BG)
         use.pack(fill="x")
         ttk.Label(use, text="Work counter signal:", style="Form.TLabel").pack(side="left")
