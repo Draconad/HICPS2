@@ -125,6 +125,7 @@ Logs are kept in `%APPDATA%\HanwhaMonitor\logs` and roll over at 1 MB × 5 files
 1. On the iPhone, turn on **Settings → Privacy & Security → Developer Mode**. The phone restarts.
 2. In Sideloadly on your PC, drop in `HanwhaMonitor.ipa`, enter your Apple ID and click **Start**.
    In Advanced options, **leave "Remove app extensions" unticked**. The Live Activity lives in an extension.
+   Also **untick "Use automatic bundle ID"**. The project already uses the ID Sideloadly would pick (`local.hanwhamonitor.app.8Y4JQ37DYS`); letting Sideloadly rename it breaks the link between the app and its Live Activity extension.
 3. On the phone, go to **Settings → General → VPN & Device Management** → trust your Apple ID.
 4. Open **XE35 Monitor** → **Settings**:
    - Enter the server URL `http://<unraid-ip>:8420` → **Test connection**. Allow local network access when asked.
