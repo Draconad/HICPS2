@@ -10,6 +10,8 @@ struct StatusView: View {
     @AppStorage("cameraCollapsed") private var cameraCollapsed = false
     /// the big status header has scrolled off the top: show the slim status bar there instead
     @State private var pinned = false
+    /// ...and once the part count has gone too, the pinned bar shows it as well
+    @State private var partsHidden = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,10 @@ struct StatusView: View {
                             CycleCard(s: s)
                         }
                         .fixedSize(horizontal: false, vertical: true)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: PartsBottomKey.self,
+                                                   value: g.frame(in: .named("statusScroll")).maxY)
+                        })
                         ProgramCard(s: s)
                         if let bc = s.barChanges, (bc.today ?? 0) > 0 || bc.lastS != nil || bc.perBar != nil {
                             BarChangeCard(stats: bc, s: s)
@@ -64,9 +70,13 @@ struct StatusView: View {
                 let hide = bottom < 12
                 if hide != pinned { withAnimation(.easeOut(duration: 0.18)) { pinned = hide } }
             }
+            .onPreferenceChange(PartsBottomKey.self) { bottom in
+                let gone = bottom < 64          // under the pinned bar
+                if gone != partsHidden { withAnimation(.easeOut(duration: 0.18)) { partsHidden = gone } }
+            }
             .overlay(alignment: .top) {
                 if pinned, let s = store.status {
-                    PinnedStatusBar(s: s)
+                    PinnedStatusBar(s: s, showParts: partsHidden)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
@@ -97,9 +107,15 @@ private struct HeaderBottomKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = min(value, nextValue()) }
 }
 
+private struct PartsBottomKey: PreferenceKey {
+    static let defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = min(value, nextValue()) }
+}
+
 /// Slim version of the status header, pinned to the top of the screen once the big one has scrolled away.
 struct PinnedStatusBar: View {
     let s: MachineStatus
+    var showParts = false     // only once the Parts card has scrolled off too
 
     var body: some View {
         HStack(spacing: 10) {
@@ -124,7 +140,7 @@ struct PinnedStatusBar: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
-            if let p = s.parts {
+            if showParts, let p = s.parts {
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(s.partsRequired.map { "\(p)/\($0)" } ?? "\(p)")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
