@@ -6,6 +6,43 @@ import WidgetKit
 struct MachineWidgetBundle: WidgetBundle {
     var body: some Widget {
         MachineLiveActivity()
+        ExtensionCheckWidget()
+    }
+}
+
+/// A tiny home-screen widget whose only job is to prove the widget extension
+/// installed and runs. If "XE35 Monitor" shows up in the widget gallery, the
+/// same extension is available to draw the Live Activity.
+struct ExtensionCheckWidget: Widget {
+    struct Entry: TimelineEntry { let date: Date }
+
+    struct Provider: TimelineProvider {
+        func placeholder(in context: Context) -> Entry { Entry(date: Date()) }
+        func getSnapshot(in context: Context, completion: @escaping (Entry) -> Void) { completion(Entry(date: Date())) }
+        func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
+            completion(Timeline(entries: [Entry(date: Date())], policy: .never))
+        }
+    }
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "ExtensionCheck", provider: Provider()) { _ in
+            VStack(spacing: 6) {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(.title)
+                    .foregroundStyle(MachineStateKind.running.color)
+                Text("XE35 Monitor").font(.headline)
+                Text("Widget extension OK")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            .containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("XE35 Monitor (test)")
+        .description("Shows that the monitor's widget extension is installed.")
+        .supportedFamilies([.systemSmall])
     }
 }
 
