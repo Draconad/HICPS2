@@ -66,10 +66,11 @@ def main(argv=None):
         from .collector import Collector
         from .uploader import Uploader
         from .camera import CameraRelay
+        from .spool import Spool
         col = Collector(cfg)
         cam = CameraRelay(cfg)
         up = Uploader(cfg.server_url, cfg.api_key, on_ack=col.ack,
-                      on_response=lambda j: cam.set_live(j.get("camera_live")))
+                      on_response=lambda j: cam.set_live(j.get("camera_live")), spool=Spool(data_dir() / "spool.db"))
         col.listeners.append(up.submit)
         col.listeners.append(lambda s: log.info("state=%s parts=%s/%s cycle=%s prog=%s alarms=%d",
                                                 s["state"], s.get("parts"), s.get("parts_required"),

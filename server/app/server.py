@@ -4,6 +4,7 @@ Receives snapshots from the Windows agent, keeps the alarm history in SQLite, an
 status to the iPhone app plus a small web dashboard.
 
   POST /api/ingest     agent -> server snapshot
+  POST /api/replay     agent -> snapshots it kept while the server was unreachable {snapshots: [...]} (oldest first)
   GET  /api/status     current machine status + active alarms
   GET  /api/alarms     alarm history  (?limit=100&before=<epoch>&active=1)
   DELETE /api/alarms   clear cleared history  (?demo=1: delete demo-mode alarms only)
@@ -573,11 +574,13 @@ def message_rows(active_only: bool, limit: int = 100) -> list[dict]:
             for r in db.execute(sql, (limit,)).fetchall()]
 
 
-def ingest(snap: dict) -> dict:
-    now = time.time()
+def ingest(snap: dict, replay: bool = False) -> dict:
+    """replay=True: a snapshot the PC kept while this server was unreachable. It is processed with its own
+    timestamp (so cycle times, bars and the state log land where they belong) and sends no notifications."""
+    now = float(snap.get("sent_at") or time.time()) if replay else time.time()
     with _lock:
         sent_at = float(snap.get("sent_at") or now)
-        offset = now - sent_at if abs(now - sent_at) > 3 else 0.0   # correct the PC's clock drift
+        offset = 0.0 if replay else (now - sent_at if abs(now - sent_at) > 3 else 0.0)   # PC clock drift
         connected = bool(snap.get("machine_connected"))
         demo = bool(snap.get("demo"))
         if connected and not demo and not meta.get("first_real_at"):
@@ -641,7 +644,8 @@ def ingest(snap: dict) -> dict:
         track_state(now)
         kv_set("latest", latest)
         kv_set("meta", meta)
-    push.poke()
+    if not replay:
+        push.poke()
     return {"ok": True, "ack": ack, "camera_live": camera.watched}
 
 
@@ -1058,6 +1062,28 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and path == "/api/states":
                 hours = max(0.1, min(24 * 31, float((qs.get("hours") or ["24"])[0])))
                 return self._json(state_history(hours))
+            if method == "POST" and path == "/api/replay":
+                # the PC catching the server up after an outage: a list of snapshots, oldest first
+                body = self._body()
+                snaps = body.get("snapshots") or []
+                if not isinstance(snaps, list) or len(snaps) > 500:
+                    return self._json({"ok": False, "error": "send up to 500 snapshots"}, 400)
+                ack: list[str] = []
+                first = last = None
+                for snap in snaps:
+                    if not isinstance(snap, dict):
+                        continue
+                    at = float(snap.get("sent_at") or 0)
+                    first, last = first or at, at
+                    try:
+                        ack += ingest(snap, replay=True).get("ack") or []
+                    except Exception:
+                        log.exception("Replayed snapshot failed")
+                if snaps:
+                    log.info("Caught up on %d update(s) the PC saved while this server was away (%s - %s)", len(snaps),
+                             time.strftime("%H:%M:%S", time.localtime(first or 0)),
+                             time.strftime("%H:%M:%S", time.localtime(last or 0)))
+                return self._json({"ok": True, "accepted": len(snaps), "ack": ack})
             if method == "POST" and path == "/api/ingest":
                 length = int(self.headers.get("Content-Length") or 0)
                 if length <= 0 or length > 1_000_000:

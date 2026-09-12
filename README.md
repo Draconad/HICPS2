@@ -177,6 +177,11 @@ You can also add a program before it has run, to set its name or parts per bar i
 ### Dashboard on different screen sizes
 On a wide screen, the camera sits beside the status and figures, with the alarms full width underneath. On a narrower window or a phone, everything stacks in one column.
 
+### If the server or network goes down
+The PC app keeps a local log of what happened while it couldn't reach the server (`spool.db` in `%APPDATA%\HanwhaMonitor`), and replays it in order as soon as the server is back. Part times, bar changes, alarms, machine messages and state changes from that period all land with their real times, so the day's figures stay right. Notifications aren't sent for that catch-up, since it's history by then.
+
+The log survives this app restarting or updating itself, keeps up to two weeks, and the Server card shows how much is waiting ("42 updates saved to send when it's back"). The server needs to be up to date too - an older one can't accept the catch-up, and the app says so in its log.
+
 ### Automatic updates of this app
 From version 1.8.0 the PC app updates itself, so the exe only has to be copied to the machine PC once.
 1. `push-to-github.bat` stores the update-signing key as a GitHub secret the first time it runs (from `update-signing-key.txt`, which it then deletes). GitHub Actions signs every Windows build with it.

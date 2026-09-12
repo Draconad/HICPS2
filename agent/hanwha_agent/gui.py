@@ -19,6 +19,7 @@ from .updater import Updater
 from . import signals
 from .focas import FocasMachine, MockMachine, parse_signal
 from .config import VERSION, Config, data_dir, normalize_url, set_autostart
+from .spool import Spool
 from .uploader import Uploader
 
 log = logging.getLogger("hanwha.gui")
@@ -623,8 +624,9 @@ class App:
         self.collector = Collector(self.cfg)
         self.camera = CameraRelay(self.cfg)
         cam = self.camera
+        self.spool = Spool(data_dir() / "spool.db")
         self.uploader = Uploader(self.cfg.server_url, self.cfg.api_key, on_ack=self.collector.ack,
-                                 on_response=lambda j: cam.set_live(j.get("camera_live")))
+                                 on_response=lambda j: cam.set_live(j.get("camera_live")), spool=self.spool)
         self.camera.start()
         self.commands = CommandClient(self.cfg, self.collector, self.camera)
         self.commands.start()
@@ -740,9 +742,11 @@ class App:
         if up and not up.enabled:
             self._set_card(self.server_card, None, "Not configured", "Set the server URL in Settings")
         elif up and up.connected:
-            self._set_card(self.server_card, True, "Connected", f"{up.url} · sent {ago(up.last_ok)}")
+            catchup = f" · catching up ({up.pending} saved)" if up.pending else ""
+            self._set_card(self.server_card, True, "Connected", f"{up.url} · sent {ago(up.last_ok)}{catchup}")
         elif up and up.last_error:
-            self._set_card(self.server_card, False, "Can't reach server", up.last_error[:70])
+            saved = f"{up.pending} update(s) saved to send when it's back · " if up.pending else ""
+            self._set_card(self.server_card, False, "Can't reach server", (saved + up.last_error)[:90])
         else:
             self._set_card(self.server_card, None, "Connecting…", up.url if up else "")
 
