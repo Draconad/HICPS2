@@ -66,7 +66,7 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 AGENT_TIMEOUT = float(os.environ.get("AGENT_TIMEOUT", "30"))
 PORT = int(os.environ.get("PORT", "8420"))
 # Running -> standby only shows once standby has lasted this long (hides the gap between part cycles).
-STANDBY_DELAY = float(os.environ.get("STANDBY_DELAY", "4"))
+STANDBY_DELAY = float(os.environ.get("STANDBY_DELAY", "10"))
 # a bar change lasting longer than this sends a "taking long" notification (usually a failed bar load)
 BAR_CHANGE_ALERT = float(os.environ.get("BAR_CHANGE_ALERT", "180"))
 STATIC = Path(__file__).parent / "static"
@@ -179,10 +179,11 @@ def track_state(now: float):
         if meta.get("state") == "running":
             meta["running_ended_at"] = now      # for "only notify while running" (+ a short grace period)
         was, was_since = meta.get("state"), meta.get("state_since") or now
-        if state == meta.get("prev_state") and now - was_since < STATE_GLITCH:
-            # it dropped out and came straight back: carry on from before the blip
+        blip = now - was_since               # how long the state it is leaving lasted
+        # a dropout (off) that comes straight back, or any flicker of a few seconds, shouldn't restart the clock
+        if state == meta.get("prev_state") and blip < (STATE_GLITCH if was == "off" else 6):
             meta["state_since"] = meta.get("prev_state_since") or now
-            log.info("  (a %.0f s blip - %s since %s kept)", now - was_since, state,
+            log.info("  (a %.0f s blip - %s since %s kept)", blip, state,
                      time.strftime("%H:%M:%S", time.localtime(meta["state_since"])))
         else:
             meta["state_since"] = now

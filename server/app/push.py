@@ -182,6 +182,11 @@ class PushService:
         # briefly looks like off, and that isn't worth a notification
         off_for = (now - state_since) if s["state"] == "off" else 0
         notify_off = off_for > 25 and self.kv_get("push_off_alert_for") != round(state_since)
+        # same for "machine stopped": the pause between parts can show as a moment of standby
+        stopped_for = (now - state_since) if s["state"] == "standby" else 0
+        came_from_running = abs(float(s.get("running_ended_at") or 0) - state_since) < 5
+        notify_stopped = (stopped_for > 20 and came_from_running
+                          and self.kv_get("push_stopped_alert_for") != round(state_since))
         ended = s.get("running_ended_at")
         in_window = s["state"] == "running" or bool(ended and now - ended <= RUNNING_GRACE)
 
@@ -210,7 +215,7 @@ class PushService:
                     self._send(row, {"aps": {"alert": {"title": f"⚠️ {machine} — {a.get('code') or 'ALARM'}", "body": body},
                                              "sound": "default", "interruption-level": "time-sensitive",
                                              "thread-id": "alarms"}}, "alert", 10, collapse=a["id"])
-            if state_changed and prefs.get("stopped") and prev_state == "running" and s["state"] == "standby":
+            if notify_stopped and prefs.get("stopped"):
                 self._send(row, {"aps": {"alert": {"title": f"{machine} stopped", "body": s.get("state_detail") or "Standby"},
                                          "sound": "default", "thread-id": "state"}}, "alert", 10)
             if notify_off and prefs.get("off"):
@@ -218,6 +223,8 @@ class PushService:
                                          "sound": "default", "thread-id": "state"}}, "alert", 10)
         if notify_off:
             self.kv_set("push_off_alert_for", round(state_since))
+        if notify_stopped:
+            self.kv_set("push_stopped_alert_for", round(state_since))
         # ---- operator messages (e.g. "work count end in 1 hour") - not alarms, but worth a notification
         msg_notified = set(self.kv_get("push_notified_messages", []) or [])
         active_msgs = s.get("messages") or []

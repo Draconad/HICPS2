@@ -13,7 +13,7 @@ services:
       - LA_IDLE_END=600         # with the app closed, drop the lock screen card after this long standby/off (0 = never)
       - BAR_CHANGE_ALERT=180    # seconds before a slow bar change sends a notification
       - PUSH_RUNNING_GRACE=15   # "only while running" phones still get alerts this long after a stop
-      - STANDBY_DELAY=4         # seconds of standby before running -> standby shows (hides the gap between parts)
+      - STANDBY_DELAY=10        # seconds of standby before running -> standby shows (hides the gap between parts)
       # - API_KEY=change-me     # shared key (same key in the PC app, iPhone app and dashboard login) - set it if exposed to the internet
       # - RESET_LOGIN=true      # resets the dashboard login to admin / admin on start - remove again afterwards
       # Apple push (paid developer account) - put AuthKey_XXXXXXXXXX.p8 in the data folder

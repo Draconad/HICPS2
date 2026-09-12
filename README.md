@@ -97,9 +97,9 @@ Environment options:
 | `API_KEY` | *(blank)* | Shared key for the data API. If set, enter the same key in the PC app, the iPhone app and the dashboard login page. Strongly recommended if the server is reachable from the internet. |
 | `RESET_LOGIN` | *(blank)* | `true` resets the dashboard login to admin / admin on start. Remove it again afterwards. |
 | `AGENT_TIMEOUT` | `30` | Seconds without data from the PC before the machine shows **Off**. |
-| `STANDBY_DELAY` | `4` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles). |
+| `STANDBY_DELAY` | `10` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles, which on the XE35 can be 6 seconds or so). |
 | `BAR_CHANGE_ALERT` | `180` | A bar change taking longer than this many seconds sends a "bar change taking long" notification (usually a bar that didn't load). |
-| `STATE_GLITCH` | `120` | If the machine comes back in the same state within this many seconds of a dropout (monitor PC restart, network blip), the "since" clock carries on instead of restarting. |
+| `STATE_GLITCH` | `120` | If the machine comes back in the same state within this many seconds of a dropout (monitor PC restart, network blip), the "since" clock carries on instead of restarting. Flickers of a few seconds are always treated this way. |
 | `LA_IDLE_END` | `600` | With the app closed, the lock screen Live Activity is taken away once the machine has been in standby or off this long (0 = never). It comes back on its own when the machine runs again, or when you open the app. |
 | `PUSH_RUNNING_GRACE` | `15` | For phones with **Only while the machine is running** switched on: how many seconds after the machine stops notifications still come through. |
 | `TZ` | | Your timezone, used for the "alarms today" and "bar changes today" counts. |
