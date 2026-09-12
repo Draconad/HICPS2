@@ -342,6 +342,9 @@ struct PartsCard: View {
 struct BarChangeCard: View {
     let stats: MachineStatus.BarChangeStats
     let s: MachineStatus
+    @AppStorage("barDayOpen") private var open = false
+    @State private var day: BarDay?
+    @State private var loadingDay = false
 
     /// "~3 more bars needed", "Finishes on this bar", or "Learning parts per bar…"
     private func barsNeeded(_ pb: MachineStatus.PerBar) -> String? {
@@ -386,7 +389,81 @@ struct BarChangeCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            dayDropdown
         }
+        .task(id: open) { await loadDay() }
+        .onChange(of: stats.today ?? 0) { _ in Task { await loadDay() } }
+    }
+
+    /// "Today's changes" - time, parts the bar made and the program(s) that made them
+    @ViewBuilder private var dayDropdown: some View {
+        Divider().padding(.top, 2)
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { open.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text("TODAY'S CHANGES").font(.caption.weight(.semibold))
+                if let d = day, (d.changes ?? 0) > 0 {
+                    Text("(\(d.changes ?? 0) · \(d.parts ?? 0) parts)").font(.caption)
+                }
+                Spacer()
+                if loadingDay { ProgressView().controlSize(.mini) }
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .rotationEffect(.degrees(open ? 180 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        if open {
+            if let bars = day?.bars, !bars.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(bars) { b in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(Fmt.clock(Date(timeIntervalSince1970: b.at)))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text(b.parts.map { "\($0) pts" } ?? "—")
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .frame(width: 62, alignment: .leading)
+                            Text(programs(b))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            if b.partial == true {
+                                Text("PART BAR")
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(Color.orange)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 5)
+                        Divider().opacity(0.4)
+                    }
+                }
+            } else if !loadingDay {
+                Text("No bar changes today yet.").font(.caption).foregroundStyle(.secondary).padding(.top, 4)
+            }
+        }
+    }
+
+    private func programs(_ b: BarDay.Change) -> String {
+        let list = b.programs ?? []
+        if list.isEmpty { return "bar before this one wasn't recorded" }
+        return list.map { p in
+            let name = p.label ?? p.program ?? "?"
+            return list.count > 1 ? "\(name) \(p.parts ?? 0)" : name
+        }.joined(separator: " + ")
+    }
+
+    private func loadDay() async {
+        guard open else { return }
+        loadingDay = true
+        day = try? await APIClient.current.barDay()
+        loadingDay = false
     }
 }
 

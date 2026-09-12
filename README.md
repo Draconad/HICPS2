@@ -159,6 +159,11 @@ The data is at `/api/bars`. To make a program start learning again, e.g. after c
 ### Program names
 Click **Name** on the Program card on the dashboard, or tap **Name** on it in the app, to give the running program your own name. It then shows as **O3110 - EMS301** on the dashboard, the app, the Live Activity and the parts-per-bar lines. The name is stored on the server against the program number, alongside its bar counts, so it comes back whenever that program is loaded. Clear the name to remove it. The list is at `/api/programs`.
 
+### Today's bar changes
+The Bar changes card, on the dashboard and in the app, has a **Today's changes** dropdown: every bar change of the day with the time, how many parts the bar that finished made, and which program made them. It remembers whether you left it open.
+
+If the program changed part way through a bar, that bar lists both programs with their own part counts and is tagged **PART BAR**. Those bars are still kept in the program's bar log, but they're left out of the parts-per-bar averages, since neither program made a full bar. The data is at `/api/bars/day` (add `?date=2026-09-12` for another day).
+
 ### Program info
 The **Program info** button at the top of the dashboard, or Settings > **Program info** in the app, lists every program with a name, notes or bars on record. The loaded one is shown first. Open a program to:
 - set its **name** (shown as O3110 - EMS301)

@@ -68,6 +68,22 @@
   .namebtn { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: none; color: var(--muted);
              background: #1f1f1f; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
   .namebtn:hover { color: var(--ink); border-color: var(--accent); }
+  .daytoggle { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 10px; padding: 6px 0 0; border: 0;
+               border-top: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-size: 12px;
+               font-weight: 700; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
+  .daytoggle:hover { color: var(--ink); }
+  .daytoggle .chev { margin-left: auto; transition: transform .2s; }
+  .daytoggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+  .daylist { margin-top: 8px; max-height: 280px; overflow-y: auto; }
+  #bccard.wide { grid-column: 1 / -1; }        /* the day's list needs the full width */
+  .daylist .b { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #1d1d1d;
+                font-size: 13px; font-variant-numeric: tabular-nums; }
+  .daylist .b:last-child { border-bottom: 0; }
+  .daylist .t { color: var(--muted); width: 42px; flex: none; }
+  .daylist .p { font-weight: 700; width: 58px; flex: none; }
+  .daylist .g { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .daylist .d { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .daylist .part { color: #ffb454; font-weight: 700; font-size: 10px; letter-spacing: .04em; }
   .pair { display: flex; gap: 22px; flex-wrap: wrap; }
   .pair .sub { margin-top: -2px; }
   #bcsub { margin-top: 6px; }
@@ -176,7 +192,10 @@
     <div class="card" id="bccard" hidden><div class="label">Bar changes</div>
       <div class="pair"><div><div class="value" id="bctoday">—</div><div class="sub">today</div></div>
         <div id="ppbwrap"><div class="value" id="ppb">—</div><div class="sub">parts / bar</div></div></div>
-      <div class="sub" id="bcsub"></div><div class="sub" id="bcneed"></div></div>
+      <div class="sub" id="bcsub"></div><div class="sub" id="bcneed"></div>
+      <button class="daytoggle" id="bcday" aria-expanded="false">Today&#39;s changes <span id="bcdayn"></span>
+        <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="daylist" id="bcdaylist" hidden></div></div>
   </div>
 
   <div class="msgs" id="msgs"></div>
@@ -348,6 +367,36 @@ $("progname").onclick = async () => {
   if (!j.ok) alert("Couldn't save the name: " + (j.error || "HTTP " + r.status));
   status();
 };
+// today's bar changes, folded into the Bar changes card
+let dayOpen = false;
+try { dayOpen = localStorage.getItem("barDayOpen") === "1"; } catch (e) {}
+const hm = ts => new Date(ts * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+async function barDay() {
+  if (!dayOpen) return;
+  try {
+    const d = await getJSON("api/bars/day" + q);
+    $("bcdayn").textContent = d.changes ? `(${d.changes} · ${d.parts} parts)` : "";
+    $("bcdaylist").innerHTML = d.bars.length ? d.bars.map(b => {
+      const progs = (b.programs || []).map(p => `${esc(p.label || p.program || "?")}${b.programs.length > 1 ? " " + p.parts : ""}`).join(" + ");
+      return `<div class="b"><span class="t">${hm(b.at)}</span><span class="p">${b.parts == null ? "—" : b.parts + " pts"}</span>
+        <span class="g">${progs || "<i>bar before this one wasn't recorded</i>"}${b.partial ? ' <span class="part">PART BAR</span>' : ""}</span>
+        <span class="d">${b.duration_s ? "change " + Math.round(b.duration_s) + "s" : ""}</span></div>`;
+    }).join("") : `<div class="b"><span class="g">No bar changes today yet.</span></div>`;
+  } catch (e) {}
+}
+$("bcday").onclick = () => {
+  dayOpen = !dayOpen;
+  try { localStorage.setItem("barDayOpen", dayOpen ? "1" : "0"); } catch (e) {}
+  $("bcday").setAttribute("aria-expanded", String(dayOpen));
+  $("bcdaylist").hidden = !dayOpen;
+  $("bccard").classList.toggle("wide", dayOpen);
+  barDay();
+};
+$("bcday").setAttribute("aria-expanded", String(dayOpen));
+$("bcdaylist").hidden = !dayOpen;
+$("bccard").classList.toggle("wide", dayOpen);
+setInterval(barDay, 30000);
+barDay();
 async function history() {
   const r = await getJSON("api/alarms" + (q ? q + "&" : "?") + "limit=200");
   const btn = $("cleardemo");

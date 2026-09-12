@@ -13,6 +13,7 @@ status to the iPhone app plus a small web dashboard.
   GET  /api/programs   program info list    GET /api/programs/detail?program=O3110   (+ its bars)
   POST /api/programs {program, name?, ppb_manual?, notes?}   only the fields sent change
   DELETE /api/bars?id=17 | ?program=O3110   forget one bar / all of a program's bars
+  GET  /api/bars/day?date=2026-09-12   the day's bar changes (time, parts, program(s))
   GET  /api/bars   parts per bar per program + recent bars      DELETE /api/bars?program=O1234   forget a program's bars
   GET  /api/messages   operator message history (?limit=100) - e.g. "work count end in 1 hour", not alarms
   GET  /api/health
@@ -118,6 +119,11 @@ def _connect() -> sqlite3.Connection:
         c.execute("ALTER TABLE programs ADD COLUMN ppb_manual REAL")
     if "notes" not in pcols:
         c.execute("ALTER TABLE programs ADD COLUMN notes TEXT")
+    bcols = {r["name"] for r in c.execute("PRAGMA table_info(bars)")}
+    if "programs" not in bcols:      # [{"program": "O1234", "parts": 30}, ...] when the program changed mid-bar
+        c.execute("ALTER TABLE bars ADD COLUMN programs TEXT")
+    if "partial" not in bcols:       # 1 = more than one program ran on this bar: left out of the averages
+        c.execute("ALTER TABLE bars ADD COLUMN partial INTEGER")
     return c
 
 
@@ -401,28 +407,57 @@ def _bar_count(snap: dict):
     return ("parts", int(parts)) if isinstance(parts, (int, float)) else (None, None)
 
 
+def track_bar_program(snap: dict):
+    """Follows which program is running through the current bar, so a bar that spans a program change keeps
+    the part count of each."""
+    key = program_key(snap.get("program"))
+    kind, n = _bar_count(snap)
+    if not key or n is None:
+        return
+    segs = meta.get("bar_segs") or []
+    if not segs or segs[-1].get("program") != key or segs[-1].get("kind") != kind:
+        # the segments tile the whole bar: the new one starts where the last one ended, so any parts counted
+        # in the same poll as the program change go to the new program
+        start = segs[-1]["n1"] if segs and segs[-1].get("kind") == kind and segs[-1]["n1"] <= n else n
+        segs.append({"program": key, "kind": kind, "n0": start, "n1": n})
+        meta["bar_segs"] = segs[-8:]
+    elif n >= segs[-1]["n1"]:
+        segs[-1]["n1"] = n
+    else:                                        # counter reset part way through: start this segment again
+        segs[-1]["n0"] = segs[-1]["n1"] = n
+
+
 def record_bar(snap: dict, now: float, demo: bool):
-    """Called when a bar change starts: closes the previous bar and starts counting the next one."""
+    """Called when a bar change starts: closes the bar that just finished and starts counting the next one."""
     key = program_key(snap.get("program"))
     kind, n = _bar_count(snap)
     prev = meta.get("bar_start")
+    segs = meta.get("bar_segs") or []
     meta["bar_start"] = {"program": key, "kind": kind, "n": n, "at": now, "demo": bool(demo)} if key and kind else None
+    meta["bar_segs"] = [{"program": key, "kind": kind, "n0": n, "n1": n}] if key and n is not None else []
     if not prev or not key or kind is None:
         return
-    if (prev.get("program"), prev.get("kind"), bool(prev.get("demo"))) != (key, kind, bool(demo)):
-        return                                   # program or counter changed part way through the bar
+    if (prev.get("kind"), bool(prev.get("demo"))) != (kind, bool(demo)):
+        return                                   # the counter changed part way through the bar
     made = n - prev["n"]
     if not 1 <= made <= 20000 or now - prev["at"] > 7 * 86400:
         return                                   # counter reset, or a gap too long to trust
-    db.execute("INSERT INTO bars(program,parts,started_at,ended_at,demo) VALUES(?,?,?,?,?)",
-               (key, made, prev["at"], now, int(demo)))
-    log.info("Bar finished on %s: %d parts", key, made)
+    by_program = [{"program": s["program"], "parts": s["n1"] - s["n0"]} for s in segs
+                  if s.get("kind") == kind and s["n1"] > s["n0"]]
+    if not by_program:
+        by_program = [{"program": prev.get("program") or key, "parts": made}]
+    partial = len(by_program) > 1                # more than one program on this bar: not a clean parts-per-bar
+    main = max(by_program, key=lambda x: x["parts"])["program"]
+    db.execute("INSERT INTO bars(program,parts,started_at,ended_at,demo,programs,partial) VALUES(?,?,?,?,?,?,?)",
+               (main, made, prev["at"], now, int(demo), json.dumps(by_program), int(partial)))
+    log.info("Bar finished: %d parts (%s)%s", made,
+             ", ".join(f"{p['program']} {p['parts']}" for p in by_program), " - partial, left out of the average" if partial else "")
 
 
 def learnt_parts_per_bar(key: str, demo: bool) -> tuple[float | None, int]:
     vals = [r["parts"] for r in db.execute(
-        "SELECT parts FROM bars WHERE program=? AND COALESCE(demo,0)=? ORDER BY ended_at DESC LIMIT ?",
-        (key, int(demo), BAR_HISTORY * 2)).fetchall()]
+        "SELECT parts FROM bars WHERE program=? AND COALESCE(demo,0)=? AND COALESCE(partial,0)=0 "
+        "ORDER BY ended_at DESC LIMIT ?", (key, int(demo), BAR_HISTORY * 2)).fetchall()]
     if not vals:
         return None, 0
     med = sorted(vals)[len(vals) // 2]
@@ -496,6 +531,40 @@ def bar_forecast(now: float) -> dict | None:
     return pb
 
 
+def bar_day(date_str: str | None, now: float) -> dict:
+    """Every bar change of one day: when the bar was changed, how long it took, how many parts the bar that
+    finished made, and which program(s) made them."""
+    if date_str:
+        try:
+            t = time.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return {"error": "date must look like 2026-09-12"}
+        start = time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
+    else:
+        lt = time.localtime(now)
+        start = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    end = start + 86400
+    rows = db.execute(
+        "SELECT bc.started_at, bc.ended_at, bc.duration_s, bc.demo, b.id bar_id, b.parts, b.programs, b.partial, "
+        "b.started_at bar_from FROM bar_changes bc LEFT JOIN bars b ON b.ended_at = bc.started_at "
+        "WHERE bc.started_at >= ? AND bc.started_at < ? ORDER BY bc.started_at DESC", (start, end)).fetchall()
+    out = []
+    for r in rows:
+        try:
+            progs = json.loads(r["programs"]) if r["programs"] else []
+        except ValueError:
+            progs = []
+        if not progs and r["parts"] is not None:
+            progs = [{"program": None, "parts": r["parts"]}]
+        out.append({"at": r["started_at"], "ended_at": r["ended_at"], "duration_s": r["duration_s"],
+                    "demo": bool(r["demo"]), "bar_id": r["bar_id"], "parts": r["parts"], "bar_from": r["bar_from"],
+                    "partial": bool(r["partial"]),
+                    "programs": [{**p, "label": program_label(p.get("program"))} for p in progs]})
+    made = sum(b["parts"] or 0 for b in out)
+    return {"date": time.strftime("%Y-%m-%d", time.localtime(start)), "day_start": start,
+            "changes": len(out), "parts": made, "bars": out}
+
+
 def message_rows(active_only: bool, limit: int = 100) -> list[dict]:
     sql = "SELECT * FROM op_messages" + (" WHERE cleared_at IS NULL" if active_only else "") + \
           " ORDER BY started_at DESC LIMIT ?"
@@ -533,6 +602,8 @@ def ingest(snap: dict) -> dict:
         snap["cycle_started_at"] = (now - timer) if (timer and snap.get("state") == "running") else None
         if snap.get("state") != latest.get("state"):
             meta["raw_since"] = now
+        if connected:
+            track_bar_program(snap)     # keep the per-program part counts up to date before any bar change
         snap["bar_change"] = bool(snap.get("bar_change")) and connected and snap.get("state") == "running"
         if snap["bar_change"] != bool(latest.get("bar_change")):
             if snap["bar_change"]:
@@ -913,9 +984,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": False, "error": "program= is required"}, 400)
                 with _lock:
                     info = program_row(key, program_key(latest.get("program")))
-                    info["bars"] = [dict(r) for r in db.execute(
-                        "SELECT id, parts, started_at, ended_at FROM bars WHERE program=? AND COALESCE(demo,0)=0 "
-                        "ORDER BY ended_at DESC LIMIT 200", (key,))]
+                    info["bars"] = [{**dict(r), "partial": bool(r["partial"]),
+                                     "programs": json.loads(r["programs"]) if r["programs"] else []}
+                                    for r in db.execute(
+                        "SELECT id, parts, started_at, ended_at, partial, programs FROM bars WHERE program=? "
+                        "AND COALESCE(demo,0)=0 ORDER BY ended_at DESC LIMIT 200", (key,))]
                 return self._json(info)
             if method in ("POST", "PUT") and path == "/api/programs":
                 # {"program": "O3110", "name": "EMS301", "ppb_manual": 43, "notes": "..."} - only the fields sent change;
@@ -950,6 +1023,10 @@ class Handler(BaseHTTPRequestHandler):
                 log.info("Program %s: name=%r parts/bar=%s", key, name, ppb)
                 push.poke()
                 return self._json({"ok": True, **info})
+            if method == "GET" and path == "/api/bars/day":
+                with _lock:
+                    d = bar_day((qs.get("date") or [""])[0].strip() or None, time.time())
+                return self._json(d, 400 if d.get("error") else 200)
             if method == "GET" and path == "/api/bars":
                 # parts per bar, per program (what the forecast is based on), plus the recent bars
                 with _lock:

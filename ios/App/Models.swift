@@ -213,6 +213,31 @@ struct ProgramRecord: Decodable, Equatable, Identifiable {
     }
 }
 
+/// One day's bar changes (the dropdown in the Bar changes card)
+struct BarDay: Decodable {
+    var date: String?
+    var changes: Int?
+    var parts: Int?
+    var bars: [Change]
+
+    struct Change: Decodable, Identifiable {
+        var at: Double                 // when the bar was changed
+        var durationS: Double?         // how long the change took
+        var parts: Int?                // parts made by the bar that just finished
+        var partial: Bool?             // more than one program ran on it: left out of the averages
+        var barId: Int?
+        var programs: [Part]?
+
+        var id: Double { at }
+
+        struct Part: Decodable, Hashable {
+            var program: String?
+            var label: String?
+            var parts: Int?
+        }
+    }
+}
+
 struct ProgramList: Decodable {
     var programs: [ProgramRecord]
     var loaded: String?

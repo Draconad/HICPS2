@@ -205,6 +205,12 @@ struct APIClient {
         }
     }
 
+    /// The day's bar changes: when, how many parts the bar made, and which program(s) made them.
+    func barDay(date: String? = nil) async throws -> BarDay {
+        let q = date.map { [URLQueryItem(name: "date", value: $0)] } ?? []
+        return try await send(try request("/api/bars/day", query: q), as: BarDay.self)
+    }
+
     // MARK: Program info
 
     func programs() async throws -> ProgramList {
