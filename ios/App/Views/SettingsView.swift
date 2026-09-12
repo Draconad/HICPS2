@@ -165,7 +165,7 @@ struct SettingsView: View {
                     Toggle("Bar change taking too long", isOn: $notifyBarChange)
                     Toggle("Machine stopped (running → standby)", isOn: $notifyStopped)
                     Toggle("Machine switched off / offline", isOn: $notifyOff)
-                    Toggle("Only while the machine is running", isOn: $onlyWhileRunning)
+                    Toggle("Only notify while the machine is running", isOn: $onlyWhileRunning)
                     if notifStatus == .denied {
                         Button("Notifications are blocked — open iOS Settings") {
                             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -183,8 +183,8 @@ struct SettingsView: View {
                     Text("Notifications")
                 } footer: {
                     Text(onlyWhileRunning
-                         ? "Notifications and Live Activity updates are only sent while the machine is running, and for 15 seconds after it stops – so the alarm that stopped it still comes through. Nothing arrives while it's sat idle."
-                         : "Turn on \u{201C}Only while the machine is running\u{201D} to stay quiet while the machine is idle (e.g. overnight).")
+                         ? "Notifications are only sent while the machine is running, and for 15 seconds after it stops – so the alarm that stopped it still comes through. Nothing arrives while it's sat idle. The lock screen Live Activity keeps updating either way."
+                         : "Turn this on to stay quiet while the machine is idle (e.g. overnight). It only affects notifications – the Live Activity carries on.")
                 }
 
                 Section {

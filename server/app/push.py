@@ -22,8 +22,8 @@ START_THROTTLE = 10 * 60       # don't push-to-start more than this often
 # devices with "only while running" on still get everything for this long after the machine stops,
 # so the alarm that stopped it (or one right after) still comes through
 RUNNING_GRACE = float(os.environ.get("PUSH_RUNNING_GRACE", "15"))
-# the machine has been idle this long: end the Live Activity rather than leave a stale card on the lock screen
-# (the app starts a new one when it's opened, and push-to-start brings one back when the machine runs again)
+# the machine has been OFF this long (not just standing by): end the Live Activity rather than leave a stale card
+# on the lock screen. The app starts one when it's opened, and push-to-start brings it back when the machine is on.
 LA_IDLE_END = float(os.environ.get("LA_IDLE_END", "600"))
 
 
@@ -191,7 +191,8 @@ class PushService:
         in_window = s["state"] == "running" or bool(ended and now - ended <= RUNNING_GRACE)
 
         def muted(row) -> bool:
-            """This device only wants notifications / Live Activity updates while the machine is running."""
+            """This device only wants alarm and other notifications while the machine is running. The Live Activity
+            is never muted - it tracks the machine whatever it's doing, and only goes when the machine is off."""
             try:
                 return bool(json.loads(row["prefs"] or "{}").get("running_only")) and not in_window
             except (ValueError, TypeError):
@@ -271,7 +272,8 @@ class PushService:
         since = s.get("state_since") or now
         # only when the app isn't open - while it is, it starts and ends its own Live Activity
         app_away = now - float(s.get("app_seen") or 0) > 120
-        idle = s["state"] in ("standby", "off") and LA_IDLE_END > 0 and now - since > LA_IDLE_END and app_away
+        # only when the machine is OFF (not merely standing by): a machine that's on stays on the lock screen
+        idle = s["state"] == "off" and LA_IDLE_END > 0 and now - since > LA_IDLE_END and app_away
         with self.lock:
             la_rows = self.db.execute("SELECT * FROM push_tokens WHERE kind='la'").fetchall()
         # rollover still applies to muted ones (iOS would end them at 8 h anyway); updates don't
@@ -282,8 +284,8 @@ class PushService:
                      "sound": "default"}
         for row in la_rows:
             if idle:
-                # nothing is happening and the app isn't there to end it itself: take the card away
-                log.info("Ending Live Activity: %s for %d min", s["state"], (now - since) / 60)
+                # the machine is off and the app isn't there to end it itself: take the card away
+                log.info("Ending Live Activity: machine off for %d min", (now - since) / 60)
                 self._send(row, {"aps": {"timestamp": int(now), "event": "end", "content-state": content,
                                          "dismissal-date": int(now)}}, "liveactivity", 10)
                 self.unregister(token=row["token"])
@@ -295,8 +297,6 @@ class PushService:
                                          "dismissal-date": int(now)}}, "liveactivity", 10)
                 self.unregister(token=row["token"])
                 self.kv_set("push_rollover_pending", True)
-                continue
-            if muted(row):
                 continue
             last_key = row["last_content"]
             changed = last_key != key
@@ -322,7 +322,6 @@ class PushService:
         with self.lock:
             has_la = self.db.execute("SELECT COUNT(*) n FROM push_tokens WHERE kind='la'").fetchone()["n"] > 0
             start_rows = self.db.execute("SELECT * FROM push_tokens WHERE kind='la_start'").fetchall()
-        start_rows = [r for r in start_rows if not muted(r)]
         rollover = bool(self.kv_get("push_rollover_pending", False))
         last_start = float(self.kv_get("push_last_start", 0) or 0)
         if not has_la and start_rows and not idle and (rollover or state_changed or new_alarms) \

@@ -100,7 +100,7 @@ Environment options:
 | `STANDBY_DELAY` | `10` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles, which on the XE35 can be 6 seconds or so). |
 | `BAR_CHANGE_ALERT` | `180` | A bar change taking longer than this many seconds sends a "bar change taking long" notification (usually a bar that didn't load). |
 | `STATE_GLITCH` | `120` | If the machine comes back in the same state within this many seconds of a dropout (monitor PC restart, network blip), the "since" clock carries on instead of restarting. Flickers of a few seconds are always treated this way. |
-| `LA_IDLE_END` | `600` | With the app closed, the lock screen Live Activity is taken away once the machine has been in standby or off this long (0 = never). It comes back on its own when the machine runs again, or when you open the app. |
+| `LA_IDLE_END` | `600` | With the app closed, the lock screen Live Activity is taken away once the machine has been **off** this long (0 = never). Standby doesn't count - the card stays while the machine is on. It comes back on its own when the machine is back, or when you open the app. |
 | `PUSH_RUNNING_GRACE` | `15` | For phones with **Only while the machine is running** switched on: how many seconds after the machine stops notifications still come through. |
 | `TZ` | | Your timezone, used for the "alarms today" and "bar changes today" counts. |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(blank)* | Apple push. See section 4. Put the `AuthKey_….p8` in the data folder. |
@@ -296,7 +296,7 @@ New device: register its UDID (A0), push again so the signing includes it, then 
 What push changes:
 - **The Live Activity stays current while the app is closed.** The server sends an update whenever the status, parts, cycle or alarms change, and a refresh every 10 minutes.
 - **Alarm notifications arrive even when the app is closed.** They're *Time Sensitive*, so they get through Focus modes. The stopped and off notifications follow your Settings toggles.
-- **Only while the machine is running** (Settings > Notifications): notifications and Live Activity updates are only sent while the machine is running, and for 15 seconds after it stops, so the alarm that stopped it still comes through. Nothing arrives while it's sitting idle, e.g. overnight. This is set per phone.
+- **Only notify while the machine is running** (Settings > Notifications): notifications are only sent while the machine is running, and for 15 seconds after it stops, so the alarm that stopped it still comes through. Nothing arrives while it's sitting idle, e.g. overnight. It doesn't affect the lock screen Live Activity, which keeps updating whatever the machine is doing. This is set per phone.
 - **The 8-hour limit is handled on iOS/iPadOS 17.2 or later.** Just before iOS ends a Live Activity, the server ends it and starts a fresh one by push. It also starts one on its own when the machine changes state and none is showing, unless you've switched Live Activities off in Settings.
 - **The silent-audio trick is no longer needed.** It's off by default now.
 

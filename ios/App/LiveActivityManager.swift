@@ -199,9 +199,6 @@ final class LiveActivityManager: ObservableObject {
             if activity != nil { await stop() }
             return
         }
-        // "Only while running" (Settings > Notifications): leave the card as it was when the machine stopped,
-        // and don't start one until the machine runs again
-        if AppSettings.onlyWhileRunning, !(status?.inRunningWindow() ?? false) { return }
         let foreground = UIApplication.shared.applicationState == .active
 
         if let a = activity, let started = startedAt, Date().timeIntervalSince(started) > maxAge {

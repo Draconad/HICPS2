@@ -52,6 +52,6 @@ enum AppSettings {
     static var notifyOff: Bool { defaults.bool(forKey: SettingsKey.notifyOff) }
     static var notifyComplete: Bool { defaults.bool(forKey: SettingsKey.notifyComplete) }
     static var notifyBarChange: Bool { defaults.bool(forKey: SettingsKey.notifyBarChange) }
-    /// Notifications and Live Activity updates only while the machine is running (+15 s after it stops)
+    /// Notifications only while the machine is running (+15 s after it stops). Live Activities are unaffected.
     static var onlyWhileRunning: Bool { defaults.bool(forKey: SettingsKey.onlyWhileRunning) }
 }
