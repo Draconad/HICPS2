@@ -100,7 +100,7 @@ Environment options:
 | `STANDBY_DELAY` | `10` | Running only changes to **Standby** after the machine has been stopped this many seconds (hides the pause between part cycles, which on the XE35 can be 6 seconds or so). |
 | `BAR_CHANGE_ALERT` | `180` | A bar change taking longer than this many seconds sends a "bar change taking long" notification (usually a bar that didn't load). |
 | `STATE_GLITCH` | `120` | If the machine comes back in the same state within this many seconds of a dropout (monitor PC restart, network blip), the "since" clock carries on instead of restarting. Flickers of a few seconds are always treated this way. |
-| `LA_IDLE_END` | `600` | With the app closed, the lock screen Live Activity is taken away once the machine has been **off** this long (0 = never). Standby doesn't count - the card stays while the machine is on. It comes back on its own when the machine is back, or when you open the app. |
+| `LA_IDLE_END` | `600` | With the app closed, the lock screen Live Activity is taken away once the machine has been **off** this long (0 = never). Standby doesn't count - the card stays while the machine is on. It comes back on its own when the machine is back on. The app does the same on its own, so it doesn't reappear when you open it while the machine is off. |
 | `PUSH_RUNNING_GRACE` | `15` | For phones with **Only while the machine is running** switched on: how many seconds after the machine stops notifications still come through. |
 | `TZ` | | Your timezone, used for the "alarms today" and "bar changes today" counts. |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(blank)* | Apple push. See section 4. Put the `AuthKey_….p8` in the data folder. |

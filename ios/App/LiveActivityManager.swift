@@ -23,6 +23,14 @@ final class LiveActivityManager: ObservableObject {
 
     /// iOS ends a Live Activity after 8 hours; restart a little before that.
     private let maxAge: TimeInterval = 7.5 * 3600
+    /// The machine has been off (monitor PC shut down, or unreachable) this long: take the card away and don't
+    /// start a new one until it's back on.
+    private let offEnds: TimeInterval = 10 * 60
+
+    private func machineOff(_ s: MachineStatus?) -> Bool {
+        guard let s, s.state == .off, let since = s.stateSinceDate else { return false }
+        return Date().timeIntervalSince(since) > offEnds
+    }
 
     var systemEnabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
@@ -150,6 +158,7 @@ final class LiveActivityManager: ObservableObject {
             lastError = "iOS isn't allowing Live Activities for this app. Check Settings › HiCPS-2 › Live Activities (and Settings › Face ID & Passcode › Live Activities on the Lock Screen)."
             return
         }
+        guard !machineOff(status) else { lastAttempt = "skipped (machine off)"; return }
         guard activity == nil else { lastAttempt = "already running"; return }
         let state = Self.content(from: status, reachable: status != nil, previous: nil)
         do {
@@ -200,6 +209,15 @@ final class LiveActivityManager: ObservableObject {
             return
         }
         let foreground = UIApplication.shared.applicationState == .active
+
+        // machine off for a while (e.g. the monitor PC shut down for the night): end the card and leave it off
+        if machineOff(status) {
+            if activity != nil {
+                EventLog.shared.add("LA ended - machine off")
+                await stop()
+            }
+            return
+        }
 
         if let a = activity, let started = startedAt, Date().timeIntervalSince(started) > maxAge {
             // Try to roll over to a fresh activity before iOS kills this one at 8 h.

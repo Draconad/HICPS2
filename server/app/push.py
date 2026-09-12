@@ -324,8 +324,9 @@ class PushService:
             start_rows = self.db.execute("SELECT * FROM push_tokens WHERE kind='la_start'").fetchall()
         rollover = bool(self.kv_get("push_rollover_pending", False))
         last_start = float(self.kv_get("push_last_start", 0) or 0)
-        if not has_la and start_rows and not idle and (rollover or state_changed or new_alarms) \
-                and now - last_start > START_THROTTLE:
+        # never (re)start one while the machine is off - there is nothing to watch until it's back on
+        if (not has_la and start_rows and not idle and s["state"] != "off"
+                and (rollover or state_changed or new_alarms) and now - last_start > START_THROTTLE):
             payload = {"aps": {
                 "timestamp": int(now), "event": "start", "content-state": content,
                 "attributes-type": "MachineActivityAttributes", "attributes": {"machineName": machine},
