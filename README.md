@@ -159,6 +159,9 @@ The data is at `/api/bars`. To make a program start learning again, e.g. after c
 ### Program names
 Click **Name** on the Program card on the dashboard, or tap **Name** on it in the app, to give the running program your own name. It then shows as **O3110 - EMS301** on the dashboard, the app, the Live Activity and the parts-per-bar lines. The name is stored on the server against the program number, alongside its bar counts, so it comes back whenever that program is loaded. Clear the name to remove it. The list is at `/api/programs`.
 
+### Next bar change
+While the machine is running, the Bar changes card shows when the bar is expected to run out, e.g. "Next bar change ~14:32 (in 21m, ~28 parts)". It uses the parts left on the current bar and the cycle time the program is running at. It isn't shown when the job will finish before the bar does.
+
 ### Today's bar changes
 The Bar changes card, on the dashboard and in the app, has a **Today's changes** dropdown: every bar change of the day with the time, how many parts the bar that finished made, and which program made them. It remembers whether you left it open.
 

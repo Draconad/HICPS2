@@ -383,6 +383,14 @@ struct BarChangeCard: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(pb.avg == nil ? Color.secondary : Color.primary)
             }
+            if let next = s.date(stats.perBar?.nextBarAt), s.state.isRunning {
+                Label("Next bar change ~\(Fmt.clock(next))"
+                      + (stats.perBar?.nextBarInS.map { " (in \(Fmt.span($0))" } ?? "")
+                      + (stats.perBar?.leftOnBar.map { ", ~\($0) parts)" } ?? (stats.perBar?.nextBarInS != nil ? ")" : "")),
+                      systemImage: "timer")
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+            }
             if let last = s.date(stats.lastAt) {
                 Text("Last finished \(Fmt.clock(last))"
                      + (stats.avgWeekS.map { " · 7-day average " + Fmt.span($0) } ?? ""))

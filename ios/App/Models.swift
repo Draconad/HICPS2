@@ -116,6 +116,8 @@ struct MachineStatus: Decodable, Equatable {
         var leftOnBar: Int?        // roughly how many more the current bar will make
         var moreBars: Int?         // bars still to load after this one
         var barsTotal: Int?        // when it isn't known how far into the current bar it is
+        var nextBarAt: Double?     // when this bar is expected to run out (server clock)
+        var nextBarInS: Double?
     }
 
     struct OpMessage: Decodable, Equatable, Identifiable {

@@ -521,14 +521,24 @@ def bar_forecast(now: float) -> dict | None:
     parts, req = latest.get("parts"), latest.get("parts_required")
     left = (req - parts) if (req and parts is not None and req > parts) else None
     pb["parts_left"] = left
+    on_bar = max(0, round(avg - into)) if (into is not None and avg > 0) else None
+    if on_bar is not None:
+        pb["left_on_bar"] = on_bar
     if left and avg > 0:
         import math
-        if into is not None:
-            on_bar = max(0, round(avg - into))
-            pb["left_on_bar"] = on_bar
+        if on_bar is not None:
             pb["more_bars"] = 0 if left <= on_bar else math.ceil((left - on_bar) / avg)
         else:
             pb["bars_total"] = math.ceil(left / avg)   # don't know how far into the current bar it is
+    # when this bar runs out, at the cycle time this program is running at
+    cyc = latest.get("last_cycle_s") or learnt_cycle(key, bool(latest.get("demo")))[0]
+    if on_bar is not None and cyc:
+        wait = on_bar * cyc
+        if left:                                       # the job finishes first: no more bar changes needed
+            wait = None if left <= on_bar else wait
+        if wait is not None and wait < 30 * 86400:
+            pb["next_bar_in_s"] = round(wait)
+            pb["next_bar_at"] = round(now + wait)
     return pb
 
 
