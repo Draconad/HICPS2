@@ -166,14 +166,28 @@ def effective_state(now: float) -> tuple[str, str, bool]:
     return state, latest.get("state_detail", ""), True
 
 
+# A blip - the monitor PC restarting (e.g. to install an update), a network hiccup, a missed FOCAS poll - briefly
+# shows as Off. If the machine is back in the same state within this long, keep the original "since" time instead of
+# restarting the clock.
+STATE_GLITCH = float(os.environ.get("STATE_GLITCH", "120"))
+
+
 def track_state(now: float):
     state, detail, _ = effective_state(now)
     if state != meta.get("state"):
         log.info("State %s -> %s (%s)", meta.get("state"), state, detail)
         if meta.get("state") == "running":
             meta["running_ended_at"] = now      # for "only notify while running" (+ a short grace period)
+        was, was_since = meta.get("state"), meta.get("state_since") or now
+        if state == meta.get("prev_state") and now - was_since < STATE_GLITCH:
+            # it dropped out and came straight back: carry on from before the blip
+            meta["state_since"] = meta.get("prev_state_since") or now
+            log.info("  (a %.0f s blip - %s since %s kept)", now - was_since, state,
+                     time.strftime("%H:%M:%S", time.localtime(meta["state_since"])))
+        else:
+            meta["state_since"] = now
+        meta["prev_state"], meta["prev_state_since"] = was, was_since
         meta["state"] = state
-        meta["state_since"] = now
         db.execute("INSERT INTO state_log(ts,state,detail) VALUES(?,?,?)", (now, state, detail))
         kv_set("meta", meta)
 

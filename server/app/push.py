@@ -177,6 +177,11 @@ class PushService:
         machine = s.get("machine_name") or "Hanwha XE35"
         prev_state = self.kv_get("push_last_state")
         state_changed = prev_state is not None and prev_state != s["state"]
+        state_since = s.get("state_since") or now
+        # "machine off" only after it has stayed off a little while: the monitor PC restarting (e.g. for an update)
+        # briefly looks like off, and that isn't worth a notification
+        off_for = (now - state_since) if s["state"] == "off" else 0
+        notify_off = off_for > 25 and self.kv_get("push_off_alert_for") != round(state_since)
         ended = s.get("running_ended_at")
         in_window = s["state"] == "running" or bool(ended and now - ended <= RUNNING_GRACE)
 
@@ -208,9 +213,11 @@ class PushService:
             if state_changed and prefs.get("stopped") and prev_state == "running" and s["state"] == "standby":
                 self._send(row, {"aps": {"alert": {"title": f"{machine} stopped", "body": s.get("state_detail") or "Standby"},
                                          "sound": "default", "thread-id": "state"}}, "alert", 10)
-            if state_changed and prefs.get("off") and s["state"] == "off":
+            if notify_off and prefs.get("off"):
                 self._send(row, {"aps": {"alert": {"title": f"{machine} is off", "body": s.get("state_detail") or ""},
                                          "sound": "default", "thread-id": "state"}}, "alert", 10)
+        if notify_off:
+            self.kv_set("push_off_alert_for", round(state_since))
         # ---- operator messages (e.g. "work count end in 1 hour") - not alarms, but worth a notification
         msg_notified = set(self.kv_get("push_notified_messages", []) or [])
         active_msgs = s.get("messages") or []
