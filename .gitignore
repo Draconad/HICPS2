@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.build-venv/
+agent/build/
+agent/dist/
+*.spec
+ios/*.xcodeproj
+ios/build/
+ios/Payload/
+ios/*.ipa
+ios/App/Info.plist
+ios/Widget/Info.plist
+*.db
+*.db-*
+# FANUC DLLs are proprietary - keep them on the PC, not in the repo
+*.dll
+build-out/
+ios/build.log
+update-signing-key.txt
+update-server.txt

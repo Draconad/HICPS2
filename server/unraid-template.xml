@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>hanwha-monitor</Name>
+  <Repository>ghcr.io/YOUR-GITHUB-USERNAME/hanwha-monitor-server:latest</Repository>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Overview>Hanwha XE35 lathe monitor server: stores machine status and alarm history for the iPhone app. Web dashboard on port 8420.</Overview>
+  <WebUI>http://[IP]:[PORT:8420]/</WebUI>
+  <Config Name="Web / API port" Target="8420" Default="8420" Mode="tcp" Type="Port" Display="always" Required="true">8420</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/hanwha-monitor/data" Mode="rw" Type="Path" Display="always" Required="true">/mnt/user/appdata/hanwha-monitor/data</Config>
+  <Config Name="Timezone" Target="TZ" Default="Europe/London" Type="Variable" Display="always" Required="false">Europe/London</Config>
+  <Config Name="API key (optional)" Target="API_KEY" Default="" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="APNs Key ID" Target="APNS_KEY_ID" Default="" Type="Variable" Display="always" Required="false"></Config>
+  <Config Name="Apple Team ID" Target="APNS_TEAM_ID" Default="" Type="Variable" Display="always" Required="false"></Config>
+  <Config Name="App bundle ID (APNs topic)" Target="APNS_TOPIC" Default="com.jtquayle.hicps2" Type="Variable" Display="always" Required="false">com.jtquayle.hicps2</Config>
+  <Config Name="Agent timeout (s)" Target="AGENT_TIMEOUT" Default="30" Type="Variable" Display="advanced" Required="false">30</Config>
+  <Config Name="Reset dashboard login" Target="RESET_LOGIN" Default="" Mode="" Description="Set to true and restart to reset the dashboard login to admin / admin. Clear it again afterwards." Type="Variable" Display="advanced" Required="false"></Config>
+  <Config Name="End Live Activity when idle (s)" Target="LA_IDLE_END" Default="600" Mode="" Description="With the app closed, the lock screen Live Activity is removed after the machine has been off this long (standby does not count; 0 = never)." Type="Variable" Display="advanced" Required="false">600</Config>
+  <Config Name="Bar change alert (s)" Target="BAR_CHANGE_ALERT" Default="180" Mode="" Description="Notify when a bar change takes longer than this (usually a bar that didn't load)." Type="Variable" Display="advanced" Required="false">180</Config>
+  <Config Name="Push grace after stopping (s)" Target="PUSH_RUNNING_GRACE" Default="15" Mode="" Description="Phones set to 'only while running' still get notifications for this long after the machine stops." Type="Variable" Display="advanced" Required="false">15</Config>
+  <Config Name="Standby delay (s)" Target="STANDBY_DELAY" Default="10" Mode="" Description="Running only changes to Standby once the machine has been stopped this long - hides the pause between part cycles." Type="Variable" Display="advanced" Required="false">10</Config>
+</Container>

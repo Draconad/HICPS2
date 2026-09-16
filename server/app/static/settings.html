@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Settings - Hanwha Monitor</title>
+<link rel="icon" href="logo.png">
+<style>
+  :root { color-scheme: dark; --bg: #000; --card: #141414; --field: #1f1f1f; --ink: #f2f2f2; --muted: #8e8e93;
+          --line: #262626; --accent: #f47521; --bad: #ff453a; --good: #30c24a; --warn: #ffb454; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  header h1 { font-size: 22px; margin: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .back { font-weight: 600; font-size: 14px; }
+  .sub, .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  .state { font-size: 30px; font-weight: 800; letter-spacing: -.01em; margin: 10px 0 2px; }
+  .state.ok { color: var(--good); } .state.soon { color: var(--warn); } .state.overdue { color: var(--bad); }
+  .state.unset { color: var(--muted); }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+          letter-spacing: .05em; margin: 16px 0 6px; }
+  input, select { width: 100%; max-width: 280px; font: inherit; color: var(--ink); background: var(--field);
+                  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+  .btn { font: inherit; font-size: 14px; font-weight: 700; border-radius: 10px; padding: 9px 16px; cursor: pointer;
+         border: 1px solid var(--line); background: #1f1f1f; color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #000; }
+  .btn:hover { filter: brightness(1.12); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .msg { font-size: 13px; } .msg.ok { color: var(--good); } .msg.bad { color: var(--bad); }
+  .hist { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .hist div { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="back" href="./">&larr; Dashboard</a>
+    <h1>Settings</h1>
+  </header>
+
+  <section class="card">
+    <h2>Backup battery</h2>
+    <div class="sub">The control keeps its parameters and programs on memory backup batteries, and nothing warns
+      you before they've gone. Put in when they were last changed and it counts down to the next one - on the
+      dashboard, the wall display, the app, and as a notification.</div>
+    <div class="state unset" id="state">&mdash;</div>
+    <div class="sub" id="detail"></div>
+
+    <label for="last">Last changed</label>
+    <input type="date" id="last">
+
+    <label for="every">Change every</label>
+    <select id="every">
+      <option value="6">6 months</option>
+      <option value="12">1 year</option>
+      <option value="18">18 months</option>
+      <option value="24">2 years</option>
+      <option value="36">3 years</option>
+    </select>
+    <div class="hint">FANUC controls normally want their backup batteries once a year.</div>
+
+    <label for="warn">Warn me</label>
+    <select id="warn">
+      <option value="7">A week before</option>
+      <option value="14">Two weeks before</option>
+      <option value="30">A month before</option>
+      <option value="60">Two months before</option>
+    </select>
+
+    <div class="row">
+      <button class="btn primary" id="save">Save</button>
+      <button class="btn" id="now">Changed today</button>
+      <span class="msg" id="msg"></span>
+    </div>
+
+    <div class="hist" id="hist" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2>Dashboard login</h2>
+    <div class="sub">The username, password and API key for this browser.</div>
+    <div class="row"><a class="btn" href="login?change">Change login</a></div>
+  </section>
+</main>
+<script>
+const key = new URLSearchParams(location.search).get("key");
+const q = key ? `?key=${encodeURIComponent(key)}` : "";
+const $ = id => document.getElementById(id);
+const day = ts => ts ? new Date(ts * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—";
+const isoDay = ts => { const d = new Date(ts * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (r.status === 401) { location.replace("login"); throw new Error("Logged out"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.detail || "HTTP " + r.status);
+  return j;
+}
+
+function show(m) {
+  const left = Math.round(m.days_left ?? 0);
+  $("state").className = "state " + m.state;
+  $("state").textContent = m.state === "unset" ? "Not set"
+    : m.state === "overdue" ? `Overdue by ${Math.abs(left)} day${Math.abs(left) === 1 ? "" : "s"}`
+    : `${left} day${left === 1 ? "" : "s"} left`;
+  $("detail").textContent = m.last_at
+    ? `Last changed ${day(m.last_at)} · next due ${day(m.due_at)}`
+    : "Put in the date they were last changed to start the countdown.";
+  if (m.last_at) $("last").value = isoDay(m.last_at);
+  $("every").value = String(Math.round(m.every_months));
+  $("warn").value = String(Math.round(m.warn_days ?? 30));
+  const past = (m.history || []).slice(1);
+  $("hist").hidden = !past.length;
+  $("hist").innerHTML = past.length
+    ? "<b>Changed before this</b>" + past.slice(0, 8).map(h => `<div>${day(h)}</div>`).join("") : "";
+}
+
+async function load() {
+  try {
+    const j = await api("api/maintenance" + q);
+    const m = (j.items || []).find(x => x.item === "battery");
+    if (m) show(m);
+  } catch (e) { $("msg").className = "msg bad"; $("msg").textContent = e.message; }
+}
+
+async function save(body) {
+  $("save").disabled = $("now").disabled = true;
+  $("msg").className = "msg"; $("msg").textContent = "Saving…";
+  try {
+    const j = await api("api/maintenance" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item: "battery", ...body }) });
+    show(j);
+    $("msg").className = "msg ok"; $("msg").textContent = "Saved";
+    setTimeout(() => { $("msg").textContent = ""; }, 4000);
+  } catch (e) { $("msg").className = "msg bad"; $("msg").textContent = e.message; }
+  $("save").disabled = $("now").disabled = false;
+}
+
+$("save").onclick = () => {
+  const d = $("last").value;
+  if (!d) { $("msg").className = "msg bad"; $("msg").textContent = "Pick the date they were last changed"; return; }
+  // midday, so the due date can't slip a day either way with the clocks
+  save({ last_at: new Date(d + "T12:00:00").getTime() / 1000, every_months: +$("every").value, warn_days: +$("warn").value });
+};
+$("now").onclick = () => { if (confirm("Record the backup battery as changed today?")) save({ changed: true }); };
+load();
+</script>
+</body>
+</html>

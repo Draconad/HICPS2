@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Hanwha Monitor</title>
+<link rel="icon" href="logo.png">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #000; --card: #141414; --ink: #f2f2f2; --muted: #8e8e93; --line: #262626;
+    --run: #30c24a; --bar: #2f8cff; --stby: #f2b90c; --alarm: #ff453a; --off: #8a8f98; --accent: #f47521;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+  /* wide windows: the camera sits beside the status and figures; alarms run full width underneath */
+  @media (min-width: 1180px) {
+    main { padding-inline: 28px; }
+    main.has-cam { max-width: 1560px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+                   column-gap: 24px; align-items: start; }
+    main.has-cam > header, main.has-cam > .alarmsec, main.has-cam > .footrow { grid-column: 1 / -1; }
+    main.has-cam > .top { grid-column: 1; }
+    main.has-cam > .camwrap { grid-column: 2; margin-top: 0; }
+    main.has-cam > .camwrap .camhead { margin-top: 0; }
+    main.has-cam .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 1800px) { main.has-cam { max-width: 1900px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); } }
+  @media (max-width: 600px) { .value { font-size: 24px; } td, th { padding: 8px 6px; } }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  /* status banner: easy to read at a glance */
+  body { border-top: 5px solid var(--st, var(--off)); transition: border-color .3s; }
+  .status { --st: var(--off); display: flex; align-items: center; gap: clamp(12px, 2vw, 18px); margin-bottom: 16px;
+            padding: clamp(12px, 2vw, 18px) clamp(16px, 2.6vw, 22px); border-radius: 16px; background: var(--st);
+            color: var(--st-ink, #fff); transition: background-color .3s; }
+  .status .ico { font-size: clamp(28px, 5vw, 44px); line-height: 1; flex: none; }
+  .status .main { min-width: 0; flex: 1; }
+  .status .state { font-size: clamp(28px, 5.5vw, 50px); font-weight: 800; line-height: 1; letter-spacing: .01em;
+                   text-transform: uppercase; }
+  .status .detail { font-size: clamp(14px, 2vw, 17px); font-weight: 600; margin-top: 4px; opacity: .92;
+                    overflow-wrap: anywhere; }
+  .status .since { font-size: clamp(13px, 1.8vw, 15px); font-weight: 600; margin-top: 2px; opacity: .85;
+                   font-variant-numeric: tabular-nums; }
+  .status .since b { font-weight: 800; }
+  .status .state { white-space: nowrap; }
+  @media (max-width: 520px) { .status .ico { display: none; } }
+  .status.s-running { --st: var(--run); --st-ink: #03140a; }
+  .status.s-bar     { --st: var(--bar); }
+  .status.s-standby { --st: var(--stby); --st-ink: #1d1500; }
+  .status.s-off     { --st: #3a3d42; }
+  .status.s-over    { --st: var(--run); --st-ink: #03140a; }
+  .status .overrun { flex: none; align-self: center; margin-left: auto; font-size: clamp(14px, 2vw, 18px); font-weight: 800;
+                     letter-spacing: .08em; padding: 8px 16px; border-radius: 999px; background: var(--accent); color: #1a0b00;
+                     box-shadow: 0 0 0 3px rgba(0,0,0,.18); }
+  @media (max-width: 520px) { .status { flex-wrap: wrap; } .status .overrun { margin-left: 0; } }
+  .status.s-alarm   { --st: var(--alarm); animation: alarmflash 1.6s ease-in-out infinite; }
+  @keyframes alarmflash { 50% { background-color: #b0231b; } }
+  @media (prefers-reduced-motion: reduce) { .status.s-alarm { animation: none; } }
+  .navbtn { font-size: 13px; font-weight: 700; color: var(--ink); background: #1f1f1f; border: 1px solid var(--line);
+            border-radius: 999px; padding: 7px 14px; text-decoration: none; white-space: nowrap; }
+  .navbtn:hover { border-color: var(--accent); }
+  .navrow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .labrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .namebtn { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: none; color: var(--muted);
+             background: #1f1f1f; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+  .namebtn:hover { color: var(--ink); border-color: var(--accent); }
+  .daytoggle { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 10px; padding: 6px 0 0; border: 0;
+               border-top: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-size: 12px;
+               font-weight: 700; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
+  .daytoggle:hover { color: var(--ink); }
+  .daytoggle .chev { margin-left: auto; transition: transform .2s; }
+  .daytoggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+  .daylist { margin-top: 8px; max-height: 280px; overflow-y: auto; }
+  #bccard.wide { grid-column: 1 / -1; }        /* the day's list needs the full width */
+  .daylist .b { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #1d1d1d;
+                font-size: 13px; font-variant-numeric: tabular-nums; }
+  .daylist .b:last-child { border-bottom: 0; }
+  .daylist .t { color: var(--muted); width: 42px; flex: none; }
+  .daylist .p { font-weight: 700; width: 58px; flex: none; }
+  .daylist .g { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .daylist .d { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .daylist .part { color: #ffb454; font-weight: 700; font-size: 10px; letter-spacing: .04em; }
+  .pair { display: flex; gap: 22px; flex-wrap: wrap; }
+  .pair .sub { margin-top: -2px; }
+  #bcsub { margin-top: 6px; }
+  #bcneed { margin-top: 4px; color: var(--ink); font-weight: 600; }
+  #bcnext { margin-top: 4px; color: var(--ink); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .label { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  h2 { font-size: 15px; margin: 24px 0 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
+  th { color: var(--muted); font-size: 12px; font-weight: 600; }
+  .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
+  .active { color: var(--alarm); font-weight: 700; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: #1b1b1b; }
+  .wrap { overflow-x: auto; }
+  .muted { color: var(--muted); }
+  .h2row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 8px; }
+  .h2row h2 { margin: 0; }
+  .btn { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+         border: 1px solid var(--line); background: #1f1f1f; color: var(--alarm); }
+  .btn:hover { border-color: var(--alarm); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 1px 6px; margin-left: 6px;
+         border-radius: 4px; background: var(--line); color: var(--muted); vertical-align: middle; }
+  tr.demo td { opacity: .7; }
+  .banner { background: #2a1d0a; border: 1px solid #5c3d10; color: #ffb454; border-radius: 12px; padding: 10px 14px;
+            font-size: 13px; margin-bottom: 14px; }
+  .banner code { background: #3a2810; padding: 1px 5px; border-radius: 4px; }
+  /* backup battery due / overdue - meant to be hard to miss */
+  .duebanner { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-radius: 14px; padding: 14px 18px;
+               margin-bottom: 12px; border: 1px solid; }
+  .duebanner .big { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+  .duebanner .txt { font-size: 14px; font-weight: 600; opacity: .95; }
+  .duebanner .ico { font-size: 30px; line-height: 1; }
+  .duebanner .acts { margin-left: auto; display: flex; gap: 8px; }
+  .duebanner.soon { background: #2a1d0a; border-color: #7a5410; color: #ffc46b; }
+  .duebanner.overdue { background: #34100d; border-color: #7d211a; color: #ff7b6e; animation: duepulse 2.4s ease-in-out infinite; }
+  @keyframes duepulse { 50% { border-color: #ff453a; } }
+  .duebanner .btn { color: inherit; }
+
+  .msgs { margin-top: 12px; display: grid; gap: 8px; }
+  .msg { display: flex; gap: 10px; align-items: center; background: #0e1f33; border: 1px solid #1f4470; color: #9ecbff;
+         border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+  .msg .t { margin-left: auto; color: #6b8fb8; font-weight: 500; font-size: 13px; white-space: nowrap; }
+  .camwrap { margin-top: 12px; }
+  .camhead { display: flex; align-items: center; gap: 10px; width: 100%; margin: 24px 0 8px; padding: 0; border: 0;
+             background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  .camhead h2 { margin: 0; }
+  .camhead .chev { margin-left: auto; color: var(--muted); transition: transform .2s; }
+  .camhead[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+  .camhead:hover .chev { color: var(--ink); }
+  .cam { position: relative; background: #0a0a0a; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+         aspect-ratio: 16 / 9; max-width: 100%; }
+  .cam img, .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #0a0a0a; }
+  .cam .badge { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+                padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.65); color: #fff; }
+  .cam .badge.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                             background: var(--alarm); margin-right: 6px; vertical-align: 1px; }
+  .cam .tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; }
+  .cam .tool { width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff;
+               font-size: 16px; cursor: pointer; display: grid; place-items: center; padding: 0; line-height: 0; }
+  .cam .tool:hover { background: rgba(0,0,0,.8); }
+  .ptz { opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .cam:hover .ptz, .cam.touched .ptz, .ptz:focus-within { opacity: 1; pointer-events: auto; }
+  .ptz { position: absolute; right: 10px; bottom: 10px; display: grid; grid-template-columns: repeat(3, 34px);
+         grid-template-rows: repeat(3, 34px); gap: 2px; padding: 4px; border-radius: 50%; background: rgba(0,0,0,.5); }
+  .ptz button { border: 0; background: transparent; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
+                border-radius: 8px; }
+  .ptz button:hover { background: rgba(255,255,255,.15); }
+  .ptz button:disabled { opacity: .4; cursor: default; }
+  .ptz .dot { display: grid; place-items: center; color: rgba(255,255,255,.5); font-size: 8px; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  .presets .lbl { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .presets button { font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: #1f1f1f;
+                    border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .presets button:hover { border-color: var(--accent); }
+  .camerr { color: #ff9f0a; }
+  .cam .wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px;
+               text-align: center; padding: 12px; line-height: 1.5; }
+  .footrow { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .btn.small { font-size: 12px; padding: 4px 10px; border-radius: 8px; color: var(--ink); }
+  dialog#clipbox { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 14px;
+                   padding: 14px; max-width: min(900px, 94vw); }
+  dialog#clipbox::backdrop { background: rgba(0,0,0,.7); }
+  dialog#clipbox video { width: 100%; max-height: 70vh; border-radius: 10px; background: #000; margin: 10px 0 6px; }
+  .cliphead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .footrow a { color: var(--muted); }
+  .footrow a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 id="name">Hanwha Monitor</h1>
+      <div class="sub" id="seen">Loading…</div>
+    </div>
+    <div class="navrow">
+      <a class="navbtn" id="proglink" href="programs">&#9776; Program info</a>
+      <a class="navbtn" id="reportlink" href="report">&#9776; Report</a>
+      <a class="navbtn" id="walllink" href="wall" title="Full screen display for a tablet or TV by the machine">&#9634; Wall display</a>
+      <a class="navbtn" id="setlink" href="settings">&#9881; Settings</a>
+    </div>
+  </header>
+  <div class="top">
+  <div class="duebanner" id="duebanner" hidden role="alert">
+    <span class="ico">&#128267;</span>
+    <div>
+      <div class="big" id="duetitle"></div>
+      <div class="txt" id="duetext"></div>
+    </div>
+    <div class="acts">
+      <button class="btn" id="duedone">Changed today</button>
+      <a class="btn" id="duesettings" href="settings">Settings</a>
+    </div>
+  </div>
+  <section class="status s-off" id="status" aria-live="polite">
+    <div class="ico" id="sticon">&#9711;</div>
+    <div class="main">
+      <div class="state" id="ststate">&mdash;</div>
+      <div class="detail" id="stdetail">Loading…</div>
+      <div class="since" id="stsince"></div>
+    </div>
+    <div class="overrun" id="stover" hidden>OVERRUN</div>
+  </section>
+  <div class="banner" id="openapi" hidden>
+    <b>The data API has no key.</b> This page needs a login, but anyone who can reach the server can still read
+    the machine data through <code>/api</code>. Set <code>API_KEY</code> on the Docker container (and the same key in
+    the PC app and iPhone app) to lock it down.
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Part count</div><div class="value" id="parts">—</div><div class="bar"><div id="bar"></div></div><div class="sub" id="eta"></div></div>
+    <div class="card"><div class="label">Cycle time</div><div class="value" id="cycle">—</div><div class="sub" id="cur"></div></div>
+    <div class="card"><div class="label labrow">Program <button class="namebtn" id="progname" hidden title="Give this program your own name">&#9998; Name</button></div>
+      <div class="value" id="prog" style="font-size:22px">—</div><div class="sub" id="comment"></div></div>
+    <div class="card" id="bccard" hidden><div class="label">Bar changes</div>
+      <div class="pair"><div><div class="value" id="bctoday">—</div><div class="sub">today</div></div>
+        <div id="ppbwrap"><div class="value" id="ppb">—</div><div class="sub">parts / bar</div></div></div>
+      <div class="sub" id="bcsub"></div><div class="sub" id="bcneed"></div><div class="sub" id="bcnext"></div>
+      <button class="daytoggle" id="bcday" aria-expanded="false">Today&#39;s changes <span id="bcdayn"></span>
+        <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="daylist" id="bcdaylist" hidden></div></div>
+</div>
+  </div>
+
+  <div class="msgs" id="msgs"></div>
+  </div>
+
+  <div class="camwrap" id="camcard" hidden>
+    <button class="camhead" id="camhead" aria-expanded="true">
+      <h2>Camera</h2><span class="sub" id="camhint"></span>
+      <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div id="cambody">
+    <div class="cam">
+      <div class="wait" id="camwait">Connecting to the camera…</div>
+      <img id="camimg" alt="Machine camera">
+      <video id="camvid" muted autoplay playsinline hidden></video>
+      <div class="badge" id="cambadge"></div>
+      <div class="tools">
+        <button class="tool" id="cammute" title="Unmute" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m17 9 5 6M22 9l-5 6"/></svg></button>
+        <button class="tool" id="camfull" title="Full screen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      </div>
+      <div class="ptz" id="ptz" hidden>
+        <span></span><button data-x="0" data-y="0.1" title="Tilt up">&#9650;</button><span></span>
+        <button data-x="-0.1" data-y="0" title="Pan left">&#9664;</button><span class="dot" id="ptzdot">&#9679;</span>
+        <button data-x="0.1" data-y="0" title="Pan right">&#9654;</button>
+        <span></span><button data-x="0" data-y="-0.1" title="Tilt down">&#9660;</button><span></span>
+      </div>
+    </div>
+    <div class="presets" id="presets" hidden></div>
+    <p class="sub" id="camnote">Live video runs a few seconds behind real time.</p>
+    </div>
+  </div>
+
+  <section class="alarmsec">
+  <h2>Active alarms</h2>
+  <div class="card wrap"><table><tbody id="active"><tr><td class="muted">None</td></tr></tbody></table></div>
+
+  <div class="h2row">
+    <h2>Alarm history</h2>
+    <button class="btn" id="cleardemo" hidden>Clear demo alarms</button>
+  </div>
+  <div class="card wrap"><table>
+    <thead><tr><th>Time</th><th>Code</th><th>Message</th><th>Path</th><th>Duration</th><th></th></tr></thead>
+    <tbody id="history"></tbody>
+  </table></div>
+  <dialog id="clipbox">
+    <div class="cliphead"><b id="cliptitle">Camera clip</b><button class="btn" id="clipclose">Close</button></div>
+    <video id="clipvid" controls playsinline preload="metadata"></video>
+    <div class="sub">The seconds either side of the alarm. The camera runs a little behind real life - that's already allowed for.</div>
+  </dialog>
+  </section>
+  <div class="footrow">
+    <p class="sub" id="foot"></p>
+    <p class="sub"><span id="who"></span> &middot; <a href="login?change=1">Change login</a> &middot; <a href="#" id="logout">Log out</a><span id="forget" hidden> &middot; <a href="#" id="forgetlink" title="Log out and ask for the API key again next time">Log out &amp; forget this browser</a></span></p>
+  </div>
+</main>
+<script>
+const key = new URLSearchParams(location.search).get("key");
+const q = key ? `?key=${encodeURIComponent(key)}` : "";
+const amp = q ? q + "&" : "?";
+const dur = s => { if (s == null) return "—"; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}` : `${m}:${String(x).padStart(2,"0")}`; };
+const span = s => { s = Math.round(s); if (s >= 86400) return `${Math.floor(s / 86400)}d ${Math.floor(s % 86400 / 3600)}h`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
+  if (s >= 600) return `${Math.floor(s / 60)}m`; return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
+const rel = s => { s = Math.max(0, Math.floor(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  if (d) return `${d} day${d > 1 ? "s" : ""}${h ? `, ${h} hr` : ""}`;
+  if (h) return `${h} hr${m ? `, ${m} min` : ""}`;
+  return m ? `${m} min` : `${s} sec`; };
+const t = ts => new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", second: "2-digit" });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const $ = id => document.getElementById(id);
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (r.status === 401) { location.replace("login"); throw new Error("Logged out"); }
+  return r.json();
+}
+async function status() {
+  const s = await getJSON("api/status" + q);
+  $("name").textContent = s.machine_name + (s.demo ? " (demo)" : "");
+  const bar = s.state === "running" && s.bar_change;
+  const now = s.server_time || Date.now() / 1000;
+  const kind = bar ? "bar" : (s.state === "running" && s.over_producing) ? "over"
+             : (["running", "standby", "alarm", "off"].includes(s.state) ? s.state : "off");
+  const label = { running: "Running", over: "Running", bar: "Bar change", standby: "Standby",
+                  alarm: "Alarm", off: "Off" }[kind];
+  const icon = { running: "&#9654;", over: "&#9654;", bar: "&#8635;", standby: "&#10074;&#10074;", alarm: "&#9888;",
+                 off: "&#9211;" }[kind];
+  const a0 = (s.active_alarms || [])[0];
+  let detail = s.state_detail || "";
+  if (bar) detail = "Changing bar" + (s.bar_change_since ? " · " + dur(now - s.bar_change_since) : "");
+  else if (kind === "alarm" && a0) detail = `${a0.code || "ALARM"} ${a0.message || ""}`.trim()
+                                            + (s.active_alarms.length > 1 ? `  (+${s.active_alarms.length - 1} more)` : "");
+  else if (kind === "standby" && detail.toLowerCase() === "standby") detail = "Standby – not cutting";
+  else if (kind === "over") detail = `${s.parts - s.parts_required} past the required count of ${s.parts_required}`
+                                     + (s.work_counter === false ? " · stop at count is off" : "");
+  const st = $("status");
+  st.className = "status s-" + kind;
+  $("sticon").innerHTML = icon;
+  $("ststate").textContent = label;
+  $("stover").hidden = kind !== "over";
+  $("stdetail").textContent = detail;
+  const since = bar ? s.bar_change_since : s.state_since;
+  // like the app: "Since 14:02 · 1 hr, 45 min" (the phone's clock, corrected for drift)
+  const drift = Date.now() / 1000 - now;
+  $("stsince").innerHTML = since ? `Since ${new Date((since + drift) * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`
+                                   + ` &middot; <b>${rel(now - since)}</b>` : "";
+  document.body.style.setProperty("--st", getComputedStyle(st).getPropertyValue("--st"));
+  document.title = `${label.toUpperCase()} · ${s.machine_name}`;
+  $("parts").textContent = s.parts == null ? "—" : (s.parts_required ? `${s.parts} / ${s.parts_required}` : s.parts);
+  $("bar").style.width = (s.parts_required ? Math.min(100, 100 * s.parts / s.parts_required) : 0) + "%";
+  const left = (s.parts != null && s.parts_required) ? Math.max(0, s.parts_required - s.parts) : null;
+  const toGo = left == null ? "" : (left === 0 ? (s.parts > s.parts_required
+      ? `<b style="color:var(--accent)">${s.parts - s.parts_required} over the required count</b>` : '<b style="color:var(--run)">Target reached</b>')
+    : `<b style="color:var(--ink)">${left} to go</b>${s.eta_s ? ` &middot; ~${span(s.eta_s)}` : ""}`
+      + (s.finish_at ? `<br>&#127937; Done ~${new Date(s.finish_at * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""));
+  $("eta").innerHTML = [toGo,
+    s.work_counter == null ? "" : (s.work_counter ? '<span style="color:var(--run);font-weight:600">&#9632; Stops at count</span>'
+                                                  : '<span style="color:#ff9f0a;font-weight:600">&infin; Won\'t stop at count</span>')]
+    .filter(Boolean).join("<br>");
+  $("cycle").textContent = dur(s.last_cycle_s);
+  const p = s.program || {};
+  $("cur").innerHTML = [s.cycle_started_at ? `Current cycle ${dur(Date.now() / 1000 - s.cycle_started_at)}` : "",
+    p.avg_cycle_s ? `<span title="Average of its last ${p.avg_cycle_parts} parts">Program average ${dur(p.avg_cycle_s)}</span>` : ""]
+    .filter(Boolean).join("<br>");
+  $("prog").textContent = p.label || p.name || (p.number ? "O" + p.number : "—");
+  progNow = p;
+  $("progname").hidden = !p.key;
+  $("progname").innerHTML = p.custom_name ? "&#9998; Rename" : "&#9998; Name";
+  $("comment").innerHTML = [p.comment ? esc(p.comment) : "",
+    p.stick_out ? `Sub stick out <b>${+p.stick_out} mm</b>` : "",
+    p.has_doc ? `<a href="api/programs/doc${amp}program=${encodeURIComponent(p.key)}" target="_blank" rel="noopener">Job PDF</a>` : ""]
+    .filter(Boolean).join(" &middot; ");
+  $("active").innerHTML = s.active_alarms.length ? s.active_alarms.map(a =>
+    `<tr><td class="code active">${esc(a.code)}</td><td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${t(a.started_at)}</td></tr>`).join("")
+    : `<tr><td class="muted">None</td></tr>`;
+  camUpdate(s.camera, s.agent_online !== false);
+  battUpdate(s.maintenance || []);
+  $("msgs").innerHTML = (s.messages || []).map(m =>
+    `<div class="msg">&#128172; ${esc(m.text || "Message " + m.number)}<span class="t">since ${t(m.started_at)}</span></div>`).join("");
+  const bc = s.bar_changes || {};
+  const pb = bc.per_bar;
+  $("bccard").hidden = !(bc.today || bc.last_s || pb);
+  $("bctoday").textContent = bc.today || 0;
+  // parts per bar: learnt per program, so it's known as soon as a program that has run before is loaded
+  $("ppb").textContent = pb && pb.avg ? "~" + Math.round(pb.avg) : "—";
+  $("ppbwrap").title = pb && pb.avg ? (pb.source === "manual" ? `${pb.label || pb.program}: set in Program info`
+                                      : `${pb.label || pb.program}: average of the last ${pb.bars} bar${pb.bars === 1 ? "" : "s"}`) : "";
+  let need = "";
+  if (pb && !pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)}: learning parts per bar - shown after its first full bar</span>`;
+  else if (pb && pb.parts_left) {
+    if (pb.more_bars === 0) need = `${esc(pb.label || pb.program)}: finishes on this bar (~${pb.left_on_bar} parts left on it)`;
+    else if (pb.more_bars != null) need = `${esc(pb.label || pb.program)}: ~${pb.more_bars} more bar${pb.more_bars === 1 ? "" : "s"} needed`
+                                         + (pb.left_on_bar > 0 ? ` <span class="muted">(+ ~${pb.left_on_bar} parts left on this one)</span>` : "");
+    else if (pb.bars_total != null) need = `${esc(pb.label || pb.program)}: ~${pb.bars_total} bar${pb.bars_total === 1 ? "" : "s"} for the ${pb.parts_left} parts left`;
+  } else if (pb && pb.avg) need = `<span class="muted">${esc(pb.label || pb.program)} &middot; ${pb.source === "manual" ? "parts per bar set in Program info"
+                                   : `average of ${pb.bars} bar${pb.bars === 1 ? "" : "s"}`}</span>`;
+  $("bcneed").innerHTML = need;
+  // when this bar will run out, at the cycle time it's running at
+  $("bcnext").innerHTML = (pb && pb.next_bar_at && s.state === "running")
+    ? `&#9201; Next bar change ~${hm(pb.next_bar_at)} <span class="muted">(in ${span(pb.next_bar_in_s)}${pb.left_on_bar ? ", ~" + pb.left_on_bar + " parts" : ""})</span>`
+    : "";
+  $("bcsub").innerHTML = [bc.avg_today_s || bc.avg_week_s ? `Average ${span(bc.avg_today_s || bc.avg_week_s)}` : "",
+    bc.last_s ? `Last ${span(bc.last_s)}${bc.last_at ? " at " + new Date(bc.last_at * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : ""}` : "",
+    bc.avg_week_s && bc.avg_today_s ? `7-day average ${span(bc.avg_week_s)}` : ""].filter(Boolean).join("<br>");
+  $("seen").textContent = `Monitor PC ${s.agent_online ? "online" : "offline"} · last update ${s.agent_last_seen ? t(s.agent_last_seen) : "never"}`;
+  const cmp = (a, b) => { a = String(a).split(".").map(Number); b = String(b).split(".").map(Number);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  $("foot").textContent = (s.agent_version ? `PC app v${s.agent_version}` : "")
+    + (s.agent_update && s.agent_version && cmp(s.agent_update, s.agent_version) > 0 ? ` · v${s.agent_update} waiting to install` : "");
+}
+// your own name for the running program: shown after the number (O3110 - EMS301), kept with its bar data
+let progNow = {};
+if (q) { $("proglink").href = "programs" + q; $("reportlink").href = "report" + q; $("walllink").href = "wall" + q;
+         $("setlink").href = "settings" + q; $("duesettings").href = "settings" + q; }
+$("progname").onclick = async () => {
+  const p = progNow;
+  if (!p.key) return;
+  const name = prompt(`Name for ${p.key} (shown as "${p.key} - name"). Leave empty to remove it.`, p.custom_name || "");
+  if (name === null) return;
+  const r = await fetch("api/programs" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ program: p.key, name }) });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) alert("Couldn't save the name: " + (j.error || "HTTP " + r.status));
+  status();
+};
+// today's bar changes, folded into the Bar changes card
+let dayOpen = false;
+try { dayOpen = localStorage.getItem("barDayOpen") === "1"; } catch (e) {}
+const hm = ts => new Date(ts * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+async function barDay() {
+  if (!dayOpen) return;
+  try {
+    const d = await getJSON("api/bars/day" + q);
+    $("bcdayn").textContent = d.changes ? `(${d.changes} · ${d.parts} parts)` : "";
+    $("bcdaylist").innerHTML = d.bars.length ? d.bars.map(b => {
+      const progs = (b.programs || []).map(p => `${esc(p.label || p.program || "?")}${b.programs.length > 1 ? " " + p.parts : ""}`).join(" + ");
+      return `<div class="b"><span class="t">${hm(b.at)}</span><span class="p">${b.parts == null ? "—" : b.parts + " pts"}</span>
+        <span class="g">${progs || "<i>bar before this one wasn't recorded</i>"}${b.partial ? ' <span class="part">PART BAR</span>' : ""}</span>
+        <span class="d">${b.duration_s ? "change " + Math.round(b.duration_s) + "s" : ""}</span></div>`;
+    }).join("") : `<div class="b"><span class="g">No bar changes today yet.</span></div>`;
+  } catch (e) {}
+}
+$("bcday").onclick = () => {
+  dayOpen = !dayOpen;
+  try { localStorage.setItem("barDayOpen", dayOpen ? "1" : "0"); } catch (e) {}
+  $("bcday").setAttribute("aria-expanded", String(dayOpen));
+  $("bcdaylist").hidden = !dayOpen;
+  $("bccard").classList.toggle("wide", dayOpen);
+  barDay();
+};
+$("bcday").setAttribute("aria-expanded", String(dayOpen));
+$("bcdaylist").hidden = !dayOpen;
+$("bccard").classList.toggle("wide", dayOpen);
+setInterval(barDay, 30000);
+barDay();
+// ---- backup battery --------------------------------------------------------
+// Only the warning lives here - the dates and the interval are on the settings page.
+const day = ts => ts ? new Date(ts * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—";
+
+function battUpdate(items) {
+  const m = items.find(x => x.item === "battery");
+  const banner = $("duebanner");
+  banner.hidden = !m || (m.state !== "soon" && m.state !== "overdue");
+  if (banner.hidden) return;
+  const left = Math.round(m.days_left ?? 0);
+  banner.className = "duebanner " + m.state;
+  $("duetitle").textContent = m.state === "overdue"
+    ? `${m.name} overdue by ${Math.abs(left)} day${Math.abs(left) === 1 ? "" : "s"}`
+    : `${m.name} due in ${left} day${left === 1 ? "" : "s"}`;
+  $("duetext").textContent = `Last changed ${day(m.last_at)} · due ${day(m.due_at)} · every ${Math.round(m.every_months)} months`;
+}
+
+$("duedone").onclick = async () => {
+  if (!confirm("Record the backup battery as changed today?")) return;
+  try {
+    const r = await fetch("api/maintenance" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item: "battery", changed: true }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || "HTTP " + r.status);
+    battUpdate([j]);
+  } catch (e) { alert("Couldn't save it: " + e.message); }
+};
+
+async function history() {
+  const r = await getJSON("api/alarms" + (q ? q + "&" : "?") + "limit=200");
+  const btn = $("cleardemo");
+  btn.hidden = !r.demo_count;
+  btn.textContent = `Clear demo alarms (${r.demo_count || 0})`;
+  $("history").innerHTML = r.alarms.map(a => `<tr${a.demo ? ' class="demo"' : ""}><td>${t(a.started_at)}</td><td class="code ${a.active ? "active" : ""}">${esc(a.code)}${a.demo ? '<span class="tag">DEMO</span>' : ""}</td>
+    <td>${esc(a.message)}</td><td>${esc(a.path_name)}</td><td>${a.active ? '<span class="active">Active</span>' : dur(a.duration_s)}</td>
+    <td>${a.has_clip ? `<button class="btn small clip" data-id="${esc(a.id)}" data-title="${esc(a.code + " " + (a.message || ""))}">&#9654; Clip</button>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">No alarms recorded yet</td></tr>`;
+  $("history").querySelectorAll("button.clip").forEach(b => b.onclick = () => showClip(b.dataset.id, b.dataset.title));
+}
+
+// camera clip saved around an alarm
+function showClip(id, title) {
+  $("cliptitle").textContent = title || "Camera clip";
+  $("clipvid").src = "api/camera/clip" + amp + "alarm=" + encodeURIComponent(id);
+  $("clipbox").showModal();
+  $("clipvid").play().catch(() => {});
+}
+$("clipclose").onclick = () => { $("clipvid").pause(); $("clipvid").removeAttribute("src"); $("clipbox").close(); };
+$("clipbox").addEventListener("close", () => { $("clipvid").pause(); $("clipvid").removeAttribute("src"); });
+$("cleardemo").onclick = async () => {
+  const btn = $("cleardemo");
+  if (!confirm("Delete all alarms recorded while the monitor was in demo mode? Real machine alarms are kept.")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("api/alarms" + (q ? q + "&" : "?") + "demo=1", { method: "DELETE" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    await history(); await status();
+  } catch (e) { alert("Couldn't clear demo alarms: " + e.message); }
+  btn.disabled = false;
+};
+async function logout(forget) {
+  await fetch("auth/logout", { method: "POST", headers: { "Content-Type": "application/json" },
+                               body: JSON.stringify({ forget_device: forget }) }).catch(() => {});
+  location.replace("login");
+}
+$("logout").onclick = e => { e.preventDefault(); logout(false); };
+$("forgetlink").onclick = e => { e.preventDefault(); logout(true); };
+fetch("auth/info").then(r => r.json()).then(i => {
+  $("openapi").hidden = !!i.api_key_set;
+  $("forget").hidden = !i.device_trusted;
+  $("who").textContent = i.username ? `Logged in as ${i.username}` : "";
+}).catch(() => {});
+// ---- camera: smooth live video (HLS) while the page is visible; a still image until it starts.
+// The PC only streams while someone is watching, so it takes a couple of seconds to begin.
+const HLS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js";
+let camOffline = false;
+let camVisible = false, camUrl = null, hls = null, camPoll = null, stillTimer = null, camPlaying = false, noPlayer = false;
+let attachedAt = 0, lastProgress = 0, lastTime = -1, mediaRecoveries = 0;
+const vid = $("camvid"), still = $("camimg");
+function loadScript(src) {
+  return new Promise(res => { const el = document.createElement("script"); el.src = src;
+    el.onload = () => res(true); el.onerror = () => res(false); document.head.appendChild(el); });
+}
+let hlsReady = null;
+function needHls() {
+  if (!hlsReady) hlsReady = (async () => window.Hls || (await loadScript("hls.min.js")) || (await loadScript(HLS_CDN)))();
+  return hlsReady;
+}
+function camDetach() {
+  if (hls) { hls.destroy(); hls = null; }
+  vid.removeAttribute("src"); vid.load();
+  camUrl = null; camPlaying = false; vid.hidden = true;
+}
+async function camAttach(url) {
+  camDetach();
+  camUrl = url;
+  attachedAt = lastProgress = Date.now(); lastTime = -1; mediaRecoveries = 0;
+  if (vid.canPlayType("application/vnd.apple.mpegurl")) {        // Safari / iPhone / iPad: native HLS
+    vid.src = url;
+  } else {
+    await needHls();
+    noPlayer = !window.Hls || !Hls.isSupported();
+    if (noPlayer || camUrl !== url) { camBadge(); return; }
+    // stay ~3 chunks behind live: a little more delay, but a late chunk no longer pauses the picture
+    hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 8, maxLiveSyncPlaybackRate: 1.1,
+                    backBufferLength: 10, lowLatencyMode: false,
+                    maxBufferHole: 0.6, nudgeMaxRetry: 10 });   // step over small gaps in the camera's video
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal) return;
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries++ < 2) { hls.recoverMediaError(); return; }
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
+      camDetach();                                                          // the next poll re-attaches
+    });
+    hls.loadSource(url);
+    hls.attachMedia(vid);
+  }
+  vid.play().catch(() => {});
+}
+vid.addEventListener("playing", () => { camPlaying = true; vid.hidden = false; $("camwait").hidden = true; camBadge(); });
+vid.addEventListener("waiting", () => { camPlaying = false; camBadge(); });
+vid.addEventListener("timeupdate", () => {
+  if (vid.currentTime !== lastTime) { lastTime = vid.currentTime; lastProgress = Date.now(); }
+});
+// Watchdog: if the picture hasn't moved for a while (stalled / black), start the video again from scratch
+function camWatchdog() {
+  if (!camUrl || !camInfo || !camInfo.ready || !camInfo.url) return;
+  const stuck = Date.now() - lastProgress, age = Date.now() - attachedAt;
+  if ((age > 12000 && stuck > 6000) || (!camPlaying && age > 15000 && stuck > 10000)) {
+    console.log("camera: video stuck for", stuck, "ms - restarting it");
+    vid.hidden = true;                      // show the still rather than a black box while it restarts
+    camAttach(camInfo.url);
+  }
+}
+function refreshStill() {   // kept fresh even while playing: it's what shows if the video has to restart
+  if (camOffline) return;
+  const img = new Image();
+  img.onload = () => { still.src = img.src; };
+  img.src = "api/camera/frame.jpg" + (q ? q + "&" : "?") + "t=" + Date.now();
+}
+still.onload = () => { if (!camOffline) $("camwait").hidden = true; };
+let camInfo = null;
+// roughly how far behind real time the picture is: distance to the newest video + one chunk
+// (a chunk only reaches the server once it's complete)
+function camLag() {
+  if (!camPlaying) return null;
+  const seg = (camInfo && camInfo.segment_s) || 2;
+  let toEdge = null;
+  if (hls && Number.isFinite(hls.latency)) toEdge = hls.latency;
+  else if (vid.seekable && vid.seekable.length) toEdge = vid.seekable.end(vid.seekable.length - 1) - vid.currentTime;
+  const lag = toEdge == null ? null : toEdge + seg;
+  return lag != null && lag > 0 && lag < 120 ? lag : null;
+}
+function camBadge() {
+  const b = $("cambadge");
+  const i = camInfo || {};
+  b.title = i.segment_s ? `Video chunks: ${i.segment_s}s each, arriving every ${i.arrival_gap_s ?? "?"}s ` +
+                          `(slowest ${i.arrival_gap_max_s ?? "?"}s), ${i.kbps ?? "?"} kbit/s` : "";
+  if (camPlaying) {
+    const lag = camLag();
+    b.className = "badge live";
+    b.textContent = lag ? `LIVE · ~${Math.round(lag)} s behind` : "LIVE";
+    $("camnote").textContent = lag ? `Live video is about ${Math.round(lag)} seconds behind real time.`
+                                   : "Live video runs a few seconds behind real time.";
+    return;
+  }
+  b.className = "badge";
+  const c = camInfo && camInfo.still;
+  b.textContent = noPlayer ? "Stills only - the video player didn't load" : camVisible && camInfo ? "Starting live video…" : (c && c.last_frame_at ? "Last image " + t(c.last_frame_at) : "");
+}
+async function camTick() {
+  try {
+    camInfo = await getJSON("api/camera/live" + q);        // also tells the server someone is watching
+    if (camInfo.ready && camInfo.url) {
+      const same = camUrl && camUrl.split("/").slice(-2, -1)[0] === camInfo.session;
+      if (!same) camAttach(camInfo.url); else camWatchdog();
+    } else if (camUrl && !camInfo.ready) {
+      camDetach();
+    }
+  } catch (e) {}
+  camBadge();
+}
+// the camera section can be folded away (remembered in this browser); folded = no video is streamed
+let camCollapsed = false;
+try { camCollapsed = localStorage.getItem("camCollapsed") === "1"; } catch (e) {}
+function camLayout() {
+  document.querySelector("main").classList.toggle("has-cam", !$("camcard").hidden && !camCollapsed);
+}
+function camFold() {
+  camLayout();
+  $("cambody").hidden = camCollapsed;
+  $("camhead").setAttribute("aria-expanded", String(!camCollapsed));
+  $("camhint").textContent = camCollapsed ? "hidden - click to show" : "";
+}
+$("camhead").onclick = () => {
+  camCollapsed = !camCollapsed;
+  try { localStorage.setItem("camCollapsed", camCollapsed ? "1" : "0"); } catch (e) {}
+  camFold();
+  camCollapsed ? camStop() : camStart();
+};
+camFold();
+function camStart() {
+  if (camVisible || camOffline || document.hidden || camCollapsed || $("camcard").hidden) return;
+  camVisible = true;
+  refreshStill(); camTick();
+  camPoll = setInterval(camTick, 2000);
+  stillTimer = setInterval(refreshStill, 3000);
+}
+function camStop() {
+  camVisible = false;
+  clearInterval(camPoll); clearInterval(stillTimer);
+  camDetach(); camBadge();
+}
+document.addEventListener("visibilitychange", () => document.hidden ? camStop() : camStart());
+// ---- sound, pan/tilt and saved positions (commands go through the server to the PC on the machine)
+async function sendCommand(body) {
+  const r = await fetch("api/commands" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify(body) });
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  return { ok: r.ok && j.ok, text: j.ok ? (j.message || "Done") : (j.error || j.message || `HTTP ${r.status}`) };
+}
+let ptzBusy = false;
+async function ptz(body) {
+  if (ptzBusy) return;
+  ptzBusy = true; $("ptzdot").style.color = "var(--accent)";
+  document.querySelectorAll("#ptz button, #presets button").forEach(b => b.disabled = true);
+  try {
+    const r = await sendCommand(body);
+    $("camnote").innerHTML = r.ok ? $("camnote").innerHTML : `<span class="camerr">${esc(r.text)}</span>`;
+  } catch (e) { $("camnote").innerHTML = `<span class="camerr">Couldn't reach the server</span>`; }
+  ptzBusy = false; $("ptzdot").style.color = "";
+  document.querySelectorAll("#ptz button, #presets button").forEach(b => b.disabled = false);
+}
+// the pan/tilt pad only shows while the mouse is over the video; on a touch screen, tap the video to show it
+{
+  const cam = document.querySelector(".cam");
+  let hideTimer = null;
+  cam.addEventListener("pointerdown", e => {
+    if (e.pointerType === "mouse") return;
+    cam.classList.add("touched");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => cam.classList.remove("touched"), 5000);
+  });
+}
+document.querySelectorAll("#ptz button").forEach(b =>
+  b.onclick = () => ptz({ type: "ptz", x: +b.dataset.x, y: +b.dataset.y }));
+const ICON_MUTED = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m17 9 5 6M22 9l-5 6"/></svg>';
+const ICON_SOUND = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>';
+$("cammute").onclick = () => {
+  vid.muted = !vid.muted;                 // the click itself lets the browser play sound
+  if (!vid.muted) vid.play().catch(() => {});
+  $("cammute").innerHTML = vid.muted ? ICON_MUTED : ICON_SOUND;
+  $("cammute").title = vid.muted ? "Unmute" : "Mute";
+};
+$("camfull").onclick = () => {
+  const el = document.querySelector(".cam");
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (el.requestFullscreen) el.requestFullscreen();
+  else if (vid.webkitEnterFullscreen) vid.webkitEnterFullscreen();   // iPhone Safari
+};
+let presetKey = "";
+function camFeatures(c) {
+  $("cammute").hidden = c.audio === false;
+  $("ptz").hidden = !c.ptz;
+  const presets = (c.ptz && c.presets) || [];
+  const key = JSON.stringify(presets);
+  if (key !== presetKey) {
+    presetKey = key;
+    $("presets").innerHTML = presets.length ? '<span class="lbl">Positions</span>' +
+      presets.map(p => `<button data-token="${esc(p.token)}">${esc(p.name)}</button>`).join("") : "";
+    $("presets").querySelectorAll("button").forEach(b => b.onclick = () => ptz({ type: "ptz_preset", token: b.dataset.token }));
+  }
+  $("presets").hidden = !presets.length;
+}
+
+function camUpdate(c, agentOnline) {
+  if (!c || !c.available) { $("camcard").hidden = true; camLayout(); return; }
+  $("camcard").hidden = false;
+  camLayout();
+  camFeatures(c);
+  // the monitor PC is what sends the video: with it off there is nothing live, and the last still is stale
+  camOffline = !agentOnline;
+  if (camOffline) {
+    camStop();
+    still.removeAttribute("src");
+    still.hidden = true;
+    $("camwait").hidden = false;
+    $("camwait").innerHTML = "<div><b>&#9888;&#65039; Monitor PC offline</b><br><span class=\"muted\">No camera while the PC on the machine is off</span></div>";
+    $("cambadge").textContent = "";
+    $("camnote").textContent = "";
+    return;
+  }
+  still.hidden = false;
+  $("camwait").textContent = "Connecting to the camera…";
+  camStart();
+}
+
+const tick = () => status().catch(e => $("seen").textContent = "Can't reach server: " + e);
+tick(); history(); setInterval(tick, 2000); setInterval(history, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+name: iOS app (signed .ipa, TestFlight, or unsigned)
+
+# With the App Store Connect API secrets set (paid developer account - see README), every build is signed:
+#   default                       -> Ad Hoc .ipa for your registered devices (install with iMazing / 3uTools)
+#   repo variable IOS_DISTRIBUTION=testflight -> uploaded to TestFlight instead
+# Without the secrets it falls back to an unsigned .ipa for iLoader (no Apple push).
+#
+# Secrets (repo → Settings → Secrets and variables → Actions):
+#   ASC_KEY_ID       App Store Connect API key ID          (Users and Access → Integrations → Team keys, role Admin)
+#   ASC_ISSUER_ID    issuer ID shown on that page
+#   ASC_KEY_P8       full contents of the AuthKey_XXXX.p8 you downloaded
+#   APPLE_TEAM_ID    your 10-character Team ID (Membership details)
+
+# Manual only: macOS build minutes count 10x against GitHub's free allowance (an iPhone build costs ~100 of the
+# 2,000 monthly minutes on a private repo). push-to-github.bat asks whether to build it when the iPhone code changed,
+# or start it yourself: gh workflow run ios.yml  (or the Actions tab -> "iOS app" -> Run workflow).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # macos-26 = Xcode 26. SWIFT_VERSION stays 5.0 in project.yml so Xcode 26 doesn't switch to Swift 6.
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      HAS_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        # the release zip takes seconds; brew install can spend minutes updating Homebrew first
+        run: |
+          if curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip \
+             && unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xg"; then
+            echo "$RUNNER_TEMP/xg/xcodegen/bin" >> "$GITHUB_PATH"
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # ------------------------------------------------------------------ signed build (paid account)
+      # Default: an Ad Hoc-signed .ipa for your registered devices - install it with iMazing / 3uTools.
+      # Set the repository VARIABLE  IOS_DISTRIBUTION = testflight  to upload to TestFlight instead.
+      - name: Archive and sign (${{ vars.IOS_DISTRIBUTION == 'testflight' && 'TestFlight' || 'Ad Hoc .ipa' }})
+        if: env.HAS_ASC == 'true'
+        working-directory: ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MODE: ${{ vars.IOS_DISTRIBUTION == 'testflight' && 'testflight' || 'adhoc' }}
+        run: |
+          set -o pipefail
+          KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          BASE=$(grep -m1 'CURRENT_PROJECT_VERSION' project.yml | grep -oE '[0-9]+')
+          # TestFlight needs every upload's build number to be higher than the last
+          if [ "$MODE" = testflight ]; then BUILD="$BASE.${{ github.run_number }}"; else BUILD="$BASE"; fi
+          echo "Mode $MODE, build $BUILD"
+          COMMON=(-project HanwhaMonitor.xcodeproj -scheme HanwhaMonitor -configuration Release
+                  -destination 'generic/platform=iOS' -archivePath build/HanwhaMonitor.xcarchive
+                  DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$BUILD")
+
+          # 1st try: ad-hoc signature on the archive (entitlements embedded, no development cert needed);
+          # the export step below re-signs it properly with an Apple-managed distribution certificate.
+          if ! xcodebuild archive "${COMMON[@]}" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
+                 AD_HOC_CODE_SIGNING_ALLOWED=YES PROVISIONING_PROFILE_SPECIFIER="" 2>&1 | tee build.log \
+                 | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)"; then :; fi
+          if [ ! -d build/HanwhaMonitor.xcarchive/Products/Applications/HanwhaMonitor.app ]; then
+            echo "Ad-hoc archive failed - retrying with automatic (development) signing"
+            rm -rf build/HanwhaMonitor.xcarchive
+            xcodebuild archive "${COMMON[@]}" CODE_SIGN_STYLE=Automatic "${AUTH[@]}" 2>&1 | tee -a build.log \
+              | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" || true
+          fi
+          test -d build/HanwhaMonitor.xcarchive/Products/Applications/HanwhaMonitor.app
+
+          if [ "$MODE" = testflight ]; then METHOD=app-store-connect; DEST=upload; else METHOD=release-testing; DEST=export; fi
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>$METHOD</string>
+            <key>destination</key><string>$DEST</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>thinning</key><string>&lt;none&gt;</string>
+          </dict></plist>
+          EOF
+
+          xcodebuild -exportArchive -archivePath build/HanwhaMonitor.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/export "${AUTH[@]}" \
+            2>&1 | tee -a build.log | grep -E "error:|Upload|EXPORT (SUCCEEDED|FAILED)" || true
+          grep -q "EXPORT SUCCEEDED" build.log
+
+          if [ "$MODE" = testflight ]; then
+            mkdir -p testflight
+            echo "Build $BUILD uploaded to TestFlight at $(date -u). Apple takes ~5-15 minutes to process it; then update from the TestFlight app." > testflight/README.txt
+          else
+            cp build/export/*.ipa HanwhaMonitor.ipa
+            # Show what the phone will see: push entitlement + which devices the profile allows
+            rm -rf check && mkdir check && (cd check && unzip -q ../HanwhaMonitor.ipa)
+            APP=check/Payload/HanwhaMonitor.app
+            codesign -d --entitlements - --xml "$APP" 2>/dev/null | plutil -p - || true
+            security cms -D -i "$APP/embedded.mobileprovision" > profile.plist
+            echo "Profile: $(plutil -extract Name raw profile.plist), expires $(plutil -extract ExpirationDate raw profile.plist)"
+            echo "Devices in profile:"; plutil -p profile.plist | sed -n '/ProvisionedDevices/,/]/p' 
+            codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -q aps-environment \
+              || echo "::warning::The signed app has no push entitlement - enable Push Notifications on the App ID"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_ASC == 'true' && vars.IOS_DISTRIBUTION == 'testflight'
+        with:
+          name: HanwhaMonitor-testflight
+          path: ios/testflight/README.txt
+
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_ASC == 'true' && vars.IOS_DISTRIBUTION != 'testflight'
+        with:
+          name: HanwhaMonitor-ipa
+          path: ios/HanwhaMonitor.ipa
+          retention-days: 7
+
+      # ------------------------------------------------------------------ unsigned fallback (iLoader)
+      - name: Build unsigned (iLoader signs it)
+        if: env.HAS_ASC != 'true'
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project HanwhaMonitor.xcodeproj -scheme HanwhaMonitor -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/HanwhaMonitor.app
+
+      - name: Ad-hoc sign bundles and package IPA
+        if: env.HAS_ASC != 'true'
+        working-directory: ios
+        run: |
+          app="build/Build/Products/Release-iphoneos/HanwhaMonitor.app"
+          for appex in "$app"/PlugIns/*.appex; do
+            codesign --force --sign - --timestamp=none --generate-entitlement-der "$appex"
+          done
+          # The app's entitlements (push, time-sensitive) go into the signature so sideloading tools like
+          # iLoader can see the app wants push and request it for your App ID.
+          codesign --force --sign - --timestamp=none --generate-entitlement-der \
+            --entitlements App/HanwhaMonitor.entitlements "$app"
+          codesign -d --entitlements - "$app" || true
+          for bundle in "$app" "$app"/PlugIns/*.appex; do
+            for key in CFBundleVersion CFBundleShortVersionString CFBundleIdentifier; do
+              echo "$(basename "$bundle") $key = $(plutil -extract "$key" raw -o - "$bundle/Info.plist")"
+            done
+          done
+          mkdir -p Payload
+          cp -R "$app" Payload/
+          zip -qry HanwhaMonitor.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_ASC != 'true'
+        with:
+          name: HanwhaMonitor-ipa
+          path: ios/HanwhaMonitor.ipa
+          retention-days: 7
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build.log
+          retention-days: 7

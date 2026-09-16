@@ -1,0 +1,462 @@
+import PDFKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+/// Settings > Program info: every program the server knows, with your name for it and its parts per bar.
+struct ProgramListView: View {
+    @State private var list: [ProgramRecord] = []
+    @State private var loading = true
+    @State private var error: String?
+    @State private var adding = false
+    @State private var newKey = ""
+    @State private var openKey: String?
+
+    var body: some View {
+        List {
+            if let error {
+                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+            }
+            Section {
+                ForEach(list) { p in
+                    // a plain destination link: mixing value-based links with this screen being pushed from
+                    // Settings made the navigation bounce back and forth
+                    NavigationLink {
+                        ProgramDetailView(key: p.program) { Task { await load() } }
+                    } label: {
+                        ProgramRow(p: p)
+                    }
+                }
+                if list.isEmpty && !loading && error == nil {
+                    Text("No programs yet – they appear once one has been loaded on the machine.")
+                        .foregroundStyle(.secondary)
+                }
+            } footer: {
+                Text("Each program's setup sheet: your name for it, the sub stick out, the job PDF and notes. Parts per bar and cycle time are learnt from the machine and stored against the program number.")
+            }
+        }
+        .navigationTitle("Program info")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { newKey = ""; adding = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add a program")
+            }
+        }
+        .alert("Add a program", isPresented: $adding) {
+            TextField("e.g. O3110", text: $newKey)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+            Button("Add") { add() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Give a program a name or its parts per bar before it has run.")
+        }
+        .overlay { if loading && list.isEmpty { ProgressView() } }
+        .refreshable { await load() }
+        .task { await load() }
+        // a new program opens as a sheet (a pushed destination here would upset the Settings navigation)
+        .sheet(isPresented: Binding(get: { openKey != nil }, set: { if !$0 { openKey = nil } })) {
+            if let key = openKey {
+                NavigationStack {
+                    ProgramDetailView(key: key) { Task { await load() } }
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) { Button("Done") { openKey = nil } }
+                        }
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        do {
+            list = try await APIClient.current.programs().programs
+            error = nil
+        } catch {
+            self.error = "Couldn't load programs: \(error.localizedDescription)"
+        }
+        loading = false
+    }
+
+    private func add() {
+        var k = newKey.trimmingCharacters(in: .whitespaces).uppercased()
+        if let n = Int(k), (0...99999).contains(n) { k = String(format: "O%04d", n) }
+        guard k.range(of: #"^O\d{4,5}$"#, options: .regularExpression) != nil else {
+            error = "Enter a program number like O3110"
+            return
+        }
+        openKey = k
+    }
+}
+
+private struct ProgramRow: View {
+    let p: ProgramRecord
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(p.program).font(.body.weight(.bold).monospaced())
+                    if let name = p.name { Text("- \(name)").font(.body.weight(.semibold)) }
+                    if p.loaded == true {
+                        Text("LOADED")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(MachineStateKind.running.color, in: Capsule())
+                    }
+                }
+                Text([p.stickOutText.map { "stick out " + $0 },
+                      p.hasDoc == true ? "job PDF" : nil,
+                      p.avgCycleS.map { "cycle " + Fmt.duration($0) },
+                      p.lastBarAt.map { "\(p.barsRecorded ?? 0) bars · last " + Fmt.dateTime(Date(timeIntervalSince1970: $0)) }]
+                        .compactMap { $0 }.joined(separator: " · ").nonEmpty ?? "Nothing recorded yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(p.ppbInUse.map { "~\(Int($0.rounded()))" } ?? "—")
+                    .font(.headline.monospacedDigit())
+                Text(p.ppbManual != nil ? "set" : "parts/bar")
+                    .font(.caption2)
+                    .foregroundStyle(p.ppbManual != nil ? Color.orange : Color.secondary)
+            }
+        }
+    }
+}
+
+/// One program: edit its name, parts per bar and notes; see and tidy up its recorded bars.
+struct ProgramDetailView: View {
+    let key: String
+    var onChange: () -> Void = {}
+
+    @State private var rec: ProgramRecord?
+    @State private var name = ""
+    @State private var manualOn = false
+    @State private var manualText = ""
+    @State private var stickText = ""
+    @State private var notes = ""
+    @State private var picking = false
+    @State private var uploading = false
+    @State private var confirmRemoveDoc = false
+    @State private var saving = false
+    @State private var message: (ok: Bool, text: String)?
+    @State private var confirmForget = false
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Program number") { Text(key).monospaced().fontWeight(.bold) }
+                TextField("Name, e.g. EMS301", text: $name)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Name")
+            } footer: {
+                Text("Shown after the number: \(key) - \(name.isEmpty ? "EMS301" : name)")
+            }
+
+            Section {
+                HStack {
+                    TextField("e.g. 42.5", text: $stickText)
+                        .keyboardType(.decimalPad)
+                    Text("mm").foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Sub stick out")
+            } footer: {
+                Text("The sub spindle stick out for this job - the first thing to set when it comes round again.")
+            }
+
+            Section {
+                if rec?.hasDoc == true {
+                    NavigationLink {
+                        JobPDFView(key: key, name: rec?.docName)
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(rec?.docName ?? "Job PDF").lineLimit(1)
+                                Text(docSubtitle).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "doc.richtext").foregroundStyle(.red)
+                        }
+                    }
+                    Button { picking = true } label: { Label("Replace it", systemImage: "arrow.triangle.2.circlepath") }
+                        .disabled(uploading)
+                    Button(role: .destructive) { confirmRemoveDoc = true } label: {
+                        Label("Remove the PDF", systemImage: "trash")
+                    }
+                } else {
+                    Button { picking = true } label: { Label("Add a job PDF", systemImage: "doc.badge.plus") }
+                        .disabled(uploading)
+                }
+                if uploading {
+                    HStack { ProgressView(); Text("Uploading…").foregroundStyle(.secondary) }
+                }
+            } header: {
+                Text("Job PDF")
+            } footer: {
+                Text("The drawing with the dimensions on it. Stored on the server, so it's there on the dashboard too.")
+            }
+
+            Section {
+                LabeledContent("Learnt") {
+                    Text(rec?.ppbLearnt.map { "~\(Int($0.rounded())) (last \(rec?.ppbLearntBars ?? 0) bars)" } ?? "Not yet")
+                }
+                Toggle("Set it myself", isOn: $manualOn)
+                if manualOn {
+                    TextField("Parts per bar", text: $manualText)
+                        .keyboardType(.decimalPad)
+                }
+            } header: {
+                Text("Parts per bar")
+            } footer: {
+                Text(manualOn ? "Your figure is used for the bars-needed estimate instead of the learnt one."
+                              : "Learnt from the machine, from one bar change to the next. Odd bars are left out.")
+            }
+
+            Section {
+                LabeledContent("Average") {
+                    Text(rec?.avgCycleS.map { Fmt.duration($0) + " (last \(rec?.avgCycleParts ?? 0) parts)" } ?? "Not yet")
+                        .monospacedDigit()
+                }
+            } header: {
+                Text("Cycle time")
+            } footer: {
+                Text("Part to part, learnt from the machine. Stops and odd parts are left out. Used for the finish time until the first part after the program is loaded.")
+            }
+
+            Section("Notes") {
+                TextField("Bar size, material, setup notes…", text: $notes, axis: .vertical)
+                    .lineLimit(2...6)
+            }
+
+            Section {
+                Button {
+                    save()
+                } label: {
+                    HStack {
+                        Text("Save").fontWeight(.semibold)
+                        if saving { Spacer(); ProgressView() }
+                    }
+                }
+                .disabled(saving)
+                if let message {
+                    Text(message.text).font(.footnote).foregroundStyle(message.ok ? Color.green : Color.red)
+                }
+            }
+
+            Section {
+                if let bars = rec?.bars, !bars.isEmpty {
+                    ForEach(bars) { b in
+                        HStack {
+                            Text(Fmt.dateTime(Date(timeIntervalSince1970: b.endedAt)))
+                                .font(.subheadline.monospacedDigit())
+                            Spacer()
+                            Text("\(b.parts) parts").font(.subheadline.weight(.semibold).monospacedDigit())
+                        }
+                    }
+                    .onDelete { idx in
+                        let ids = idx.compactMap { rec?.bars?[$0].id }
+                        Task {
+                            for id in ids { try? await APIClient.current.deleteBars(id: id) }
+                            await load(); onChange()
+                        }
+                    }
+                } else {
+                    Text("None yet – bars are counted from one bar change to the next while this program runs.")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Recorded bars")
+            } footer: {
+                Text("Swipe left on a bar to leave it out (e.g. a bad one).")
+            }
+
+            if (rec?.barsRecorded ?? 0) > 0 {
+                Section {
+                    Button("Forget all learnt bars", role: .destructive) { confirmForget = true }
+                } footer: {
+                    Text("E.g. after changing the bar length. Name, notes and your own parts per bar are kept.")
+                }
+            }
+        }
+        .navigationTitle(rec?.label ?? key)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .confirmationDialog("Forget all the bars recorded for \(key)?", isPresented: $confirmForget, titleVisibility: .visible) {
+            Button("Forget bars", role: .destructive) {
+                Task { try? await APIClient.current.deleteBars(program: key); await load(); onChange() }
+            }
+        }
+        .confirmationDialog("Remove the job PDF for \(key)?", isPresented: $confirmRemoveDoc, titleVisibility: .visible) {
+            Button("Remove it", role: .destructive) {
+                Task {
+                    do { try await APIClient.current.deleteDoc(key); await load(); onChange() }
+                    catch { message = (false, "Couldn't remove it: \(error.localizedDescription)") }
+                }
+            }
+        }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.pdf]) { result in
+            switch result {
+            case .success(let url): upload(url)
+            case .failure(let e): message = (false, e.localizedDescription)
+            }
+        }
+    }
+
+    /// The picked file lives outside the app, so it has to be opened inside a security-scoped session.
+    private func upload(_ url: URL) {
+        uploading = true
+        let name = url.lastPathComponent
+        Task {
+            defer { uploading = false }
+            do {
+                // reading a 20 MB file is slow: do it off the main actor, inside the file's security scope
+                let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    return try Data(contentsOf: url)
+                }.value
+                guard data.count <= 25 * 1024 * 1024 else {
+                    message = (false, "That PDF is over 25 MB.")
+                    return
+                }
+                guard data.starts(with: Array("%PDF-".utf8)) else {
+                    message = (false, "That file isn't a PDF.")
+                    return
+                }
+                try await APIClient.current.uploadDoc(key, data: data, filename: name)
+                message = (true, "PDF uploaded")
+                await load()
+                onChange()
+            } catch {
+                message = (false, "Couldn't upload it: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func load() async {
+        do {
+            let r = try await APIClient.current.programDetail(key)
+            let first = rec == nil
+            rec = r
+            if first {      // don't overwrite what's being typed on later reloads
+                name = r.name ?? ""
+                notes = r.notes ?? ""
+                stickText = r.stickOut.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } ?? ""
+                manualOn = r.ppbManual != nil
+                manualText = r.ppbManual.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } ?? ""
+            }
+        } catch {
+            message = (false, "Couldn't load: \(error.localizedDescription)")
+        }
+    }
+
+    private var docSubtitle: String {
+        var bits: [String] = []
+        if let n = rec?.docSize { bits.append(n >= 1_048_576 ? String(format: "%.1f MB", Double(n) / 1_048_576)
+                                                            : "\(max(1, n / 1024)) KB") }
+        if let at = rec?.docAt { bits.append("added " + Fmt.dateTime(Date(timeIntervalSince1970: at))) }
+        return bits.joined(separator: " · ")
+    }
+
+    private func save() {
+        var stick: Double?
+        if !stickText.trimmingCharacters(in: .whitespaces).isEmpty {
+            guard let v = Double(stickText.replacingOccurrences(of: ",", with: ".")), v > 0, v <= 2000 else {
+                message = (false, "Enter the sub stick out in mm (up to 2000), or leave it blank.")
+                return
+            }
+            stick = v
+        }
+        var ppb: Double?
+        if manualOn {
+            guard let v = Double(manualText.replacingOccurrences(of: ",", with: ".")), v >= 1, v <= 20000 else {
+                message = (false, "Enter parts per bar between 1 and 20000, or switch off \u{201C}Set it myself\u{201D}.")
+                return
+            }
+            ppb = v
+        }
+        saving = true
+        Task {
+            do {
+                try await APIClient.current.saveProgram(key, name: name.trimmingCharacters(in: .whitespaces),
+                                                        ppbManual: ppb, notes: notes, stickOut: stick)
+                message = (true, "Saved")
+                await load()
+                onChange()
+            } catch {
+                message = (false, "Couldn't save: \(error.localizedDescription)")
+            }
+            saving = false
+        }
+    }
+}
+
+
+// MARK: - Job PDF
+
+/// The job PDF for a program: downloaded from the server, then shown with PDFKit (pinch to zoom, page by page).
+struct JobPDFView: View {
+    let key: String
+    var name: String?
+
+    @State private var file: URL?
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            if let file {
+                PDFKitView(url: file)
+                    .ignoresSafeArea(edges: .bottom)
+            } else if let error {
+                ContentUnavailableView {
+                    Label("Couldn't open the PDF", systemImage: "doc.questionmark")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
+            } else {
+                ProgressView("Loading the PDF…")
+            }
+        }
+        .navigationTitle(name ?? "Job PDF")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let file {
+                ToolbarItem(placement: .primaryAction) { ShareLink(item: file) }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        error = nil
+        do { file = try await APIClient.current.downloadDoc(key, name: name) }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct PDFKitView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> PDFView {
+        let v = PDFView()
+        v.autoScales = true
+        v.displayMode = .singlePageContinuous
+        v.displayDirection = .vertical
+        v.backgroundColor = .systemBackground
+        v.document = PDFDocument(url: url)
+        return v
+    }
+
+    func updateUIView(_ v: PDFView, context: Context) {
+        if v.document?.documentURL != url { v.document = PDFDocument(url: url) }
+    }
+}

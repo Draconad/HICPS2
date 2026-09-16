@@ -1,0 +1,80 @@
+name: HanwhaMonitor
+options:
+  bundleIdPrefix: com.jtquayle
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "29"
+    TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad (an iPhone-only app on iPad gets no Live Activities)
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  HanwhaMonitor:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared
+    dependencies:
+      - target: MachineWidget
+        embed: true
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: HiCPS-2
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes: [audio, fetch, remote-notification]
+        BGTaskSchedulerPermittedIdentifiers: [local.hanwhamonitor.app.refresh]
+        NSLocalNetworkUsageDescription: Connects to the Hanwha Monitor server on your local network.
+        # Plain http:// to any address (LAN, Tailscale or public IP). Don't add NSAllowsLocalNetworking here:
+        # on iOS 10+ its presence makes iOS ignore NSAllowsArbitraryLoads, which blocks http to public IPs.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    entitlements:
+      path: App/HanwhaMonitor.entitlements
+      properties:
+        aps-environment: development          # Xcode switches this to production for TestFlight builds
+        com.apple.developer.usernotifications.time-sensitive: true
+    settings:
+      base:
+        # Registered under your paid developer account (see README). Change here + APNS_TOPIC on the server
+        # if you pick a different one.
+        PRODUCT_BUNDLE_IDENTIFIER: com.jtquayle.hicps2
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+    scheme: {}
+  MachineWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widget
+      - path: Shared
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: HiCPS-2
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        # Must start with the app's ID + "." or iOS silently ignores the extension.
+        PRODUCT_BUNDLE_IDENTIFIER: com.jtquayle.hicps2.widget
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES

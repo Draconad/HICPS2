@@ -1,0 +1,3 @@
+# Only needed for Apple push notifications (paid developer account). The server runs without them.
+httpx[http2]==0.28.1
+cryptography>=43

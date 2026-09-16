@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Program info - Hanwha Monitor</title>
+<link rel="icon" href="logo.png">
+<style>
+  :root { color-scheme: dark; --bg: #000; --card: #141414; --field: #1f1f1f; --ink: #f2f2f2; --muted: #8e8e93;
+          --line: #262626; --accent: #f47521; --bad: #ff453a; --good: #30c24a; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  header h1 { font-size: 22px; margin: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .back { font-weight: 600; font-size: 14px; }
+  .sub, .muted { color: var(--muted); font-size: 13px; }
+  .layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+  @media (max-width: 700px) { #list td:nth-child(n+5), .layout thead tr:first-child th:nth-child(n+5) { display: none; } td, th { padding: 9px 6px; } }
+  @media (min-width: 980px) { .layout { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; }
+                              #detail { position: sticky; top: 16px; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; }
+  th { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  #list tr { cursor: pointer; }
+  #list tr:hover td { background: #1b1b1b; }
+  #list tr.sel td { background: #2a1a0e; }
+  .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; white-space: nowrap; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .05em; padding: 2px 7px; border-radius: 999px;
+         margin-left: 6px; vertical-align: 1px; }
+  .tag.loaded { background: var(--good); color: #03140a; }
+  .tag.manual { background: #3a2810; color: #ffb454; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em;
+          margin: 14px 0 6px; }
+  input, textarea { width: 100%; font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+                    border-radius: 10px; padding: 10px 12px; outline: none; }
+  textarea { min-height: 70px; resize: vertical; }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { font: inherit; font-size: 14px; font-weight: 700; border-radius: 10px; padding: 9px 16px; cursor: pointer;
+         border: 1px solid var(--line); background: #1f1f1f; color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #000; }
+  .btn.danger { color: var(--bad); }
+  .btn.small { font-size: 12px; padding: 4px 10px; border-radius: 8px; }
+  .btn:hover { filter: brightness(1.12); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 12px; }
+  .fig { background: #0d0d0d; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .fig .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .fig .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .msg { font-size: 13px; margin-left: 4px; }
+  .msg.ok { color: var(--good); } .msg.bad { color: var(--bad); }
+  .empty { color: var(--muted); padding: 18px 8px; }
+  .addrow { display: flex; gap: 8px; margin-top: 12px; }
+  .addrow input { max-width: 180px; }
+  h3 { font-size: 14px; margin: 20px 0 6px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="back" href="./">&larr; Dashboard</a>
+    <h1>Program info</h1>
+    <span class="sub">Setup sheets: names, sub stick out, the job PDF, parts per bar and notes - per program number</span>
+  </header>
+  <div class="layout">
+    <section>
+      <div class="card wrap">
+        <table>
+          <thead><tr><th>Program</th><th>Name</th><th>Stick out</th><th>Parts / bar</th><th>Avg cycle</th><th>Bars</th><th>Last bar</th></tr></thead>
+          <tbody id="list"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="addrow">
+        <input id="addkey" placeholder="e.g. O3110" autocomplete="off">
+        <button class="btn" id="addbtn">Add a program</button>
+      </div>
+      <div class="hint">Add one before it has run, e.g. to give it a name or its parts per bar in advance.</div>
+    </section>
+    <section id="detail" class="card" hidden>
+      <h2 id="dtitle">—</h2>
+      <div class="sub" id="dsub"></div>
+      <div class="figs">
+        <div class="fig"><div class="k">Sub stick out</div><div class="v" id="fstickfig">—</div></div>
+        <div class="fig"><div class="k">Parts / bar in use</div><div class="v" id="fuse">—</div></div>
+        <div class="fig"><div class="k">Learnt</div><div class="v" id="flearnt">—</div></div>
+        <div class="fig"><div class="k">Bars recorded</div><div class="v" id="fbars">—</div></div>
+        <div class="fig"><div class="k">Average cycle</div><div class="v" id="fcycle">—</div></div>
+      </div>
+      <label for="fname">Name</label>
+      <input id="fname" maxlength="40" placeholder="e.g. EMS301">
+      <div class="hint" id="namehint">Shown after the number, e.g. O3110 - EMS301.</div>
+      <label for="fstick">Sub stick out (mm)</label>
+      <input id="fstick" type="number" min="0.1" max="2000" step="0.01" inputmode="decimal" placeholder="e.g. 42.5">
+      <div class="hint">The sub spindle stick out for this job - the first thing to set when it comes round again.</div>
+      <label>Job PDF</label>
+      <div class="row" id="docrow">
+        <a class="btn" id="docopen" target="_blank" rel="noopener" hidden>Open the PDF</a>
+        <button class="btn" id="docpick">Upload a PDF</button>
+        <button class="btn danger small" id="docdel" hidden>Remove</button>
+        <input id="docfile" type="file" accept="application/pdf,.pdf" hidden>
+        <span class="msg" id="docmsg"></span>
+      </div>
+      <div class="hint" id="dochint">The drawing with the dimensions on it - up to 25 MB. It shows in the app too.</div>
+      <iframe id="docview" hidden title="Job PDF" style="width:100%;height:420px;margin-top:10px;border:1px solid var(--line);border-radius:10px;background:#0d0d0d"></iframe>
+      <label for="fppb">Parts per bar (set manually)</label>
+      <input id="fppb" type="number" min="1" max="20000" step="0.1" inputmode="decimal" placeholder="blank = use the learnt figure">
+      <div class="hint">Leave blank to use the figure learnt from the machine. A number here is used instead of it.</div>
+      <label for="fnotes">Notes</label>
+      <textarea id="fnotes" maxlength="500" placeholder="Bar size, material, setup notes…"></textarea>
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="save">Save</button>
+        <span class="msg" id="msg"></span>
+      </div>
+      <h3>Recorded bars <span class="muted" id="barcount"></span></h3>
+      <div class="wrap"><table>
+        <thead><tr><th>Finished</th><th>Parts</th><th>Took</th><th></th></tr></thead>
+        <tbody id="bars"></tbody>
+      </table></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn danger" id="forget">Forget all learnt bars</button>
+        <span class="hint">e.g. after changing the bar length. It learns again from the next full bar.</span>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+const key = new URLSearchParams(location.search).get("key");
+const q = key ? `?key=${encodeURIComponent(key)}` : "";
+const amp = q ? q + "&" : "?";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const when = ts => ts ? new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "—";
+const dur = s => { s = Math.round(s); if (s >= 86400) return `${Math.floor(s / 86400)}d ${Math.floor(s % 86400 / 3600)}h`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`; return `${Math.floor(s / 60)}m`; };
+const mmss = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
+const ppbText = p => (p.ppb_manual || p.ppb_learnt) ? "~" + Math.round(p.ppb_manual || p.ppb_learnt) : "—";
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (r.status === 401) { location.replace("login"); throw new Error("Logged out"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.detail || "HTTP " + r.status);
+  return j;
+}
+
+let selected = decodeURIComponent(location.hash.slice(1)) || null;
+
+async function loadList() {
+  const j = await api("api/programs" + q);
+  if (!selected && j.loaded) selected = j.loaded;
+  $("list").innerHTML = j.programs.length ? j.programs.map(p => `
+    <tr data-k="${esc(p.program)}"${p.program === selected ? ' class="sel"' : ""}>
+      <td class="code">${esc(p.program)}${p.loaded ? '<span class="tag loaded">LOADED</span>' : ""}</td>
+      <td>${esc(p.name || "")}</td>
+      <td class="num">${p.stick_out ? (+p.stick_out) + " mm" : "—"}${p.has_doc ? ' <span class="tag manual" title="Has a job PDF">PDF</span>' : ""}</td>
+      <td class="num">${ppbText(p)}${p.ppb_manual ? '<span class="tag manual">SET</span>' : ""}</td>
+      <td class="num">${p.avg_cycle_s ? mmss(p.avg_cycle_s) : "—"}</td>
+      <td class="num">${p.bars_recorded || 0}</td>
+      <td class="num muted">${when(p.last_bar_at)}</td>
+    </tr>`).join("") : `<tr><td colspan="7" class="empty">No programs yet - they appear once one has been loaded on the machine.</td></tr>`;
+  $("list").querySelectorAll("tr[data-k]").forEach(tr => tr.onclick = () => select(tr.dataset.k));
+  if (selected) loadDetail(selected);
+}
+
+function select(k) {
+  selected = k;
+  history.replaceState(null, "", "#" + encodeURIComponent(k));
+  $("list").querySelectorAll("tr[data-k]").forEach(tr => tr.classList.toggle("sel", tr.dataset.k === k));
+  $("msg").textContent = "";
+  loadDetail(k);
+  if (innerWidth < 980) $("detail").scrollIntoView({ behavior: "smooth" });
+}
+
+async function loadDetail(k) {
+  let d;
+  try { d = await api("api/programs/detail" + amp + "program=" + encodeURIComponent(k)); }
+  catch (e) { $("detail").hidden = true; return; }
+  $("detail").hidden = false;
+  $("dtitle").innerHTML = esc(d.label || d.program) + (d.loaded ? '<span class="tag loaded">LOADED</span>' : "");
+  $("dsub").textContent = d.first_bar_at ? `Bars recorded since ${when(d.first_bar_at)}` : "No bars recorded yet";
+  $("fuse").textContent = ppbText(d) + (d.ppb_manual ? " (set)" : "");
+  $("flearnt").textContent = d.ppb_learnt ? `~${Math.round(d.ppb_learnt)}` : "—";
+  $("flearnt").title = d.ppb_learnt ? `Average of the last ${d.ppb_learnt_bars} bars (odd ones left out)` : "";
+  $("fbars").textContent = d.bars_recorded;
+  $("fcycle").textContent = d.avg_cycle_s ? mmss(d.avg_cycle_s) : "—";
+  $("fcycle").title = d.avg_cycle_s ? `Average of the last ${d.avg_cycle_parts} parts (stops and odd ones left out); ${d.cycles_recorded} stored` : "";
+  $("fname").value = d.name || "";
+  $("fppb").value = d.ppb_manual ?? "";
+  $("fppb").placeholder = d.ppb_learnt ? `blank = use the learnt ~${Math.round(d.ppb_learnt)}` : "blank = learn it from the machine";
+  $("fnotes").value = d.notes || "";
+  $("fstick").value = d.stick_out ?? "";
+  $("fstickfig").textContent = d.stick_out ? (+d.stick_out).toFixed(2).replace(/\.?0+$/, "") + " mm" : "—";
+  $("namehint").textContent = `Shown after the number, e.g. ${d.program} - ${d.name || "EMS301"}.`;
+  showDoc(d);
+  $("barcount").textContent = d.bars.length ? `(${d.bars.length})` : "";
+  $("bars").innerHTML = d.bars.length ? d.bars.map(b => `<tr><td class="num">${when(b.ended_at)}</td><td class="num"><b>${b.parts}</b></td>
+      <td class="num muted">${dur(b.ended_at - b.started_at)}</td>
+      <td style="text-align:right"><button class="btn small danger" data-id="${b.id}" title="Leave this bar out, e.g. a bad one">Remove</button></td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">Bars are counted from one bar change to the next while this program runs.</td></tr>`;
+  $("bars").querySelectorAll("button[data-id]").forEach(btn => btn.onclick = async () => {
+    btn.disabled = true;
+    try { await api("api/bars" + amp + "id=" + btn.dataset.id, { method: "DELETE" }); await loadList(); }
+    catch (e) { alert("Couldn't remove it: " + e.message); btn.disabled = false; }
+  });
+  $("forget").disabled = !d.bars.length;
+}
+
+// ---- job PDF -----------------------------------------------------------------
+const docUrl = k => "api/programs/doc" + amp + "program=" + encodeURIComponent(k) + "&t=" + Date.now();
+
+function showDoc(d) {
+  const has = !!d.has_doc;
+  $("docopen").hidden = !has;
+  $("docdel").hidden = !has;
+  $("docview").hidden = !has;
+  $("docpick").textContent = has ? "Replace it" : "Upload a PDF";
+  $("docmsg").textContent = "";
+  if (has) {
+    const url = docUrl(d.program);
+    $("docopen").href = url;
+    $("docview").src = url;
+    const kb = d.doc_size ? Math.round(d.doc_size / 1024) : 0;
+    $("dochint").textContent = `${d.doc_name} · ${kb >= 1024 ? (kb / 1024).toFixed(1) + " MB" : kb + " KB"} · added ${when(d.doc_at)}`;
+  } else {
+    $("docview").removeAttribute("src");
+    $("dochint").textContent = "The drawing with the dimensions on it - up to 25 MB. It shows in the app too.";
+  }
+}
+
+$("docpick").onclick = () => { if (selected) $("docfile").click(); };
+$("docfile").onchange = async () => {
+  const f = $("docfile").files[0];
+  if (!f || !selected) return;
+  $("docfile").value = "";
+  if (f.size > 25 * 1024 * 1024) { $("docmsg").className = "msg bad"; $("docmsg").textContent = "That PDF is over 25 MB"; return; }
+  $("docmsg").className = "msg"; $("docmsg").textContent = "Uploading…";
+  try {
+    await api("api/programs/doc" + amp + "program=" + encodeURIComponent(selected),
+      { method: "PUT", headers: { "Content-Type": "application/pdf", "X-Filename": f.name.replace(/[^\x20-\x7e]/g, "_") }, body: f });
+    await loadList();
+    $("docmsg").className = "msg ok"; $("docmsg").textContent = "Uploaded";
+  } catch (e) { $("docmsg").className = "msg bad"; $("docmsg").textContent = e.message; }
+};
+$("docdel").onclick = async () => {
+  if (!selected || !confirm("Remove the job PDF for " + selected + "?")) return;
+  try { await api("api/programs/doc" + amp + "program=" + encodeURIComponent(selected), { method: "DELETE" }); await loadList(); }
+  catch (e) { $("docmsg").className = "msg bad"; $("docmsg").textContent = e.message; }
+};
+
+$("save").onclick = async () => {
+  if (!selected) return;
+  const ppb = $("fppb").value.trim();
+  const stick = $("fstick").value.trim();
+  $("save").disabled = true;
+  try {
+    await api("api/programs" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ program: selected, name: $("fname").value, notes: $("fnotes").value,
+                             stick_out: stick === "" ? null : +stick, ppb_manual: ppb === "" ? null : +ppb }) });
+    $("msg").className = "msg ok"; $("msg").textContent = "Saved";
+    await loadList();
+  } catch (e) { $("msg").className = "msg bad"; $("msg").textContent = e.message; }
+  $("save").disabled = false;
+};
+$("forget").onclick = async () => {
+  if (!selected || !confirm(`Forget all the bars recorded for ${selected}? Its name, notes and any parts per bar you set are kept.`)) return;
+  try { await api("api/bars" + amp + "program=" + encodeURIComponent(selected), { method: "DELETE" }); await loadList(); }
+  catch (e) { alert("Couldn't do that: " + e.message); }
+};
+$("addbtn").onclick = async () => {
+  let k = $("addkey").value.trim().toUpperCase();
+  if (/^\d{1,5}$/.test(k)) k = "O" + k.padStart(4, "0");
+  if (!/^O\d{4,5}$/.test(k)) { alert("Enter a program number like O3110"); return; }
+  $("addkey").value = "";
+  selected = k;
+  history.replaceState(null, "", "#" + k);
+  await loadList();
+  // not stored until something is saved for it
+  if (!$("list").querySelector(`tr[data-k="${k}"]`)) {
+    $("list").insertAdjacentHTML("afterbegin", `<tr data-k="${k}" class="sel"><td class="code">${k}</td><td class="muted">new</td><td>—</td><td>—</td><td>—</td><td>0</td><td>—</td></tr>`);
+  }
+  loadDetail(k); $("fname").focus();
+};
+$("addkey").onkeydown = e => { if (e.key === "Enter") $("addbtn").click(); };
+loadList().catch(e => $("list").innerHTML = `<tr><td colspan="7" class="empty">Couldn't load: ${esc(e.message)}</td></tr>`);
+</script>
+</body>
+</html>

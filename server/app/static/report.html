@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Operations report - Hanwha Monitor</title>
+<link rel="icon" href="logo.png">
+<style>
+  :root { color-scheme: dark; --bg: #000; --card: #141414; --field: #1f1f1f; --ink: #f2f2f2; --muted: #8e8e93;
+          --line: #262626; --accent: #f47521; --bad: #ff453a; --good: #30c24a; --warn: #ffb454; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+  header h1 { font-size: 22px; margin: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .back { font-weight: 600; font-size: 14px; }
+  .sub, .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .wrap { overflow-x: auto; }
+  .seg { display: inline-flex; background: var(--field); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); background: none; border: 0;
+                padding: 8px 16px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #000; }
+  .figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+  .fig { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .fig .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .fig .v { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .fig .n { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr.b { cursor: pointer; }
+  tbody tr.b:hover td { background: #1b1b1b; }
+  tbody tr.b.open td { background: #1b1b1b; }
+  .chev { display: inline-block; width: 12px; color: var(--muted); font-size: 11px; }
+  .bar { height: 6px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+  .kids td { background: #0d0d0d; font-size: 13px; color: var(--muted); }
+  .kids .code { color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
+  .empty { color: var(--muted); padding: 22px 8px; text-align: center; }
+  h2 { font-size: 16px; margin: 22px 0 8px; }
+  .split { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { .split { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); align-items: start; } }
+  .util { display: inline-block; min-width: 42px; }
+  @media (max-width: 620px) { td:nth-child(n+6), th:nth-child(n+6) { display: none; } main { padding: 14px 10px 30px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="back" href="./">&larr; Dashboard</a>
+    <h1>Operations report</h1>
+    <span class="sub" id="range"></span>
+  </header>
+
+  <div class="seg" id="seg">
+    <button data-p="day" class="on">By day</button>
+    <button data-p="month">By month</button>
+    <button data-p="year">By year</button>
+  </div>
+
+  <div class="figs">
+    <div class="fig"><div class="k">Parts made</div><div class="v" id="tparts">—</div><div class="n" id="tpartsn"></div></div>
+    <div class="fig"><div class="k">Bars run</div><div class="v" id="tbars">—</div><div class="n" id="tbarsn"></div></div>
+    <div class="fig"><div class="k">Running time</div><div class="v" id="trun">—</div><div class="n" id="trunn"></div></div>
+    <div class="fig"><div class="k">Stopped / waiting</div><div class="v" id="tidle">—</div><div class="n" id="tidlen"></div></div>
+  </div>
+
+  <div class="split">
+    <section class="card wrap">
+      <table>
+        <thead><tr><th id="hper">Day</th><th class="num">Parts</th><th class="num">Bars</th><th class="num">Running</th>
+          <th class="num">Cycle</th><th class="num">Parts/hr</th><th class="num">Busy</th><th style="width:22%"></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </section>
+    <section class="card wrap">
+      <h2 style="margin-top:0">Parts by program</h2>
+      <table>
+        <thead><tr><th>Program</th><th class="num">Parts</th><th class="num">Bars</th><th class="num">Running</th></tr></thead>
+        <tbody id="progs"><tr><td colspan="4" class="empty">—</td></tr></tbody>
+      </table>
+      <div class="sub" style="margin-top:10px">Tap a row on the left to see that period broken down by program.</div>
+    </section>
+  </div>
+</main>
+<script>
+const key = new URLSearchParams(location.search).get("key");
+const q = key ? `?key=${encodeURIComponent(key)}` : "";
+const amp = q ? q + "&" : "?";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const n0 = v => (v || 0).toLocaleString("en-GB");
+const hrs = s => { s = Math.round(s || 0); if (!s) return "—";
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : (h ? `${h}h ${m}m` : `${m}m`); };
+const mmss = s => { if (!s) return "—"; s = Math.round(s); const m = Math.floor(s / 60), x = s % 60;
+  return `${m}:${String(x).padStart(2, "0")}`; };
+
+async function api(path) {
+  const r = await fetch(path);
+  if (r.status === 401) { location.replace("login"); throw new Error("Logged out"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.detail || "HTTP " + r.status);
+  return j;
+}
+
+let period = localStorage.getItem("reportPeriod") || "day";
+let data = null, openKey = null;
+
+function limitFor(p) { return p === "day" ? 60 : p === "month" ? 24 : 10; }
+
+async function load() {
+  $("seg").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.p === period));
+  $("hper").textContent = { day: "Day", month: "Month", year: "Year" }[period];
+  try {
+    data = await api(`api/report${amp}period=${period}&limit=${limitFor(period)}`);
+  } catch (e) {
+    $("rows").innerHTML = `<tr><td colspan="8" class="empty">Couldn't load: ${esc(e.message)}</td></tr>`;
+    return;
+  }
+  draw();
+}
+
+function draw() {
+  const b = data.buckets, t = data.totals;
+  const days = b.reduce((n, x) => n + (x.days || 0), 0);
+  $("range").textContent = data.from ? `Recorded since ${data.from}` : "";
+  $("tparts").textContent = n0(t.parts);
+  $("tpartsn").textContent = days ? `over ${days} working day${days === 1 ? "" : "s"}` : "";
+  $("tbars").textContent = n0(t.bars);
+  $("tbarsn").textContent = t.bars && t.parts ? `~${Math.round(t.parts / t.bars)} parts a bar` : "";
+  $("trun").textContent = hrs(t.run_s);
+  const busy = t.run_s + t.standby_s + t.alarm_s;
+  $("trunn").textContent = busy > 60 ? `${Math.round(t.run_s / busy * 100)}% of the time it was on` : "";
+  $("tidle").textContent = hrs(t.standby_s + t.alarm_s);
+  $("tidlen").textContent = t.alarm_s > 60 ? `${hrs(t.alarm_s)} of it in alarm` : "";
+
+  const most = Math.max(1, ...b.map(x => x.parts));
+  $("rows").innerHTML = b.length ? b.map(x => {
+    const on = x.run_s + x.standby_s + x.alarm_s;
+    const util = on > 60 ? Math.round(x.run_s / on * 100) + "%" : "—";
+    const kids = (x.programs || []).map(p => `<tr class="kids" data-for="${esc(x.key)}"${openKey === x.key ? "" : " hidden"}>
+        <td colspan="3"><span class="code">${esc(p.label)}</span></td>
+        <td class="num">${n0(p.parts)} parts</td><td class="num">${mmss(p.avg_cycle_s)}</td>
+        <td class="num">${p.bars ? p.bars + " bars" : ""}</td><td class="num">${hrs(p.run_s)}</td><td></td></tr>`).join("");
+    return `<tr class="b${openKey === x.key ? " open" : ""}" data-k="${esc(x.key)}">
+        <td><span class="chev">${openKey === x.key ? "▾" : "▸"}</span> ${esc(x.label)}</td>
+        <td class="num"><b>${n0(x.parts)}</b></td>
+        <td class="num">${n0(x.bars)}</td>
+        <td class="num">${hrs(x.run_s)}</td>
+        <td class="num">${mmss(x.avg_cycle_s)}</td>
+        <td class="num">${x.parts_per_hour ?? "—"}</td>
+        <td class="num"><span class="util">${util}</span></td>
+        <td><div class="bar" style="width:${Math.max(2, Math.round(x.parts / most * 100))}%"></div></td>
+      </tr>${kids}`;
+  }).join("") : `<tr><td colspan="8" class="empty">Nothing recorded yet. Figures start building up as the machine runs.</td></tr>`;
+
+  $("rows").querySelectorAll("tr.b").forEach(tr => tr.onclick = () => {
+    openKey = openKey === tr.dataset.k ? null : tr.dataset.k;
+    draw();
+  });
+
+  const list = t.programs || [];
+  $("progs").innerHTML = list.length ? list.map(p => `<tr><td class="code">${esc(p.label)}</td>
+      <td class="num"><b>${n0(p.parts)}</b></td><td class="num">${n0(p.bars)}</td><td class="num">${hrs(p.run_s)}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">—</td></tr>`;
+}
+
+$("seg").querySelectorAll("button").forEach(btn => btn.onclick = () => {
+  period = btn.dataset.p;
+  localStorage.setItem("reportPeriod", period);
+  openKey = null;
+  load();
+});
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>
